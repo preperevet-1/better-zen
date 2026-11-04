@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name           Zen Tidy Tabs
-// @description    Local rule-based temporary tab groups with native Zen folders.
+// @description    Apple Intelligence tab grouping with native Zen folders.
 // @include        main
-// @version        0.6.0
+// @version        0.7.0
 // ==/UserScript==
 (() => {
   'use strict';
@@ -84,15 +84,36 @@
     }
     return { groups, loose:tabs.filter((_, i) => !used.has(i)) };
   }
+  function apiError(status, body, retryAfter = '') {
+    const raw = body?.error?.code || body?.error?.type || '';
+    const code = /^[a-z_]{1,80}$/.test(raw) ? raw : 'unknown';
+    let explanation;
+    if (['insufficient_quota','credit_balance_exhausted','billing_hard_limit_reached'].includes(code)) {
+      explanation = 'API credits or quota are unavailable. Check your API organization billing and balance at https://platform.openai.com/settings/organization/billing/overview. Creating a key alone does not add API credits.';
+    } else if (['organization_spend_limit_exceeded','project_spend_limit_exceeded','organization_usage_limit_exceeded'].includes(code)) {
+      explanation = 'Your organization or project API spending/usage limit was reached. Check the limits for the project that owns this key.';
+    } else if (status === 429 && ['rate_limit_exceeded','rate_limit_error','slow_down'].includes(code)) {
+      const seconds = Number(retryAfter);
+      explanation = 'Temporary request/token rate limit. ' +
+        (Number.isFinite(seconds) && seconds > 0 ? `Wait at least ${Math.ceil(seconds)} seconds before trying again.` : 'Wait before retrying and check your project rate limits.');
+    } else if (status === 429) {
+      explanation = 'OpenAI returned a quota or rate-limit error without a recognized reason. Check API billing and project limits. Do not regenerate your key just for this error.';
+    } else if (status === 401) {
+      explanation = 'API key rejected. Open Tidy → OpenAI settings and check or replace the key.';
+    } else {
+      explanation = 'Check your model and project API access in OpenAI settings.';
+    }
+    return `OpenAI ${status} (${code}). ${explanation} Tabs were not changed.`;
+  }
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { classify, groupTabs, eligible, RULES, aiURL, parseAIPlan }; return;
+    module.exports = { classify, groupTabs, eligible, RULES, aiURL, parseAIPlan, apiError }; return;
   }
   if (location.href !== 'chrome://browser/content/browser.xhtml') return;
   window.ZenTidyTabs?.destroy();
   const NS = 'http://www.w3.org/1999/xhtml';
   const states = new Map();
   const abort = new AbortController();
-  let observer, timer, startupTimer, originalAddTab, patchedAddTab, settingsMenu, requestController, destroyed = false, busy = false;
+  let observer, timer, startupTimer, originalAddTab, patchedAddTab, settingsMenu, requestController, appleProcess, destroyed = false, busy = false;
   const node = (tag, cls, text) => {
     const el = document.createElementNS(NS, tag);
     if (cls) el.className = cls;
@@ -156,6 +177,53 @@
       previous = tab;
     }
   }
+  // This release switches the existing installation to the requested local engine once.
+  if (!Services.prefs.getBoolPref('zen.tidy.apple-enabled-v7', false)) {
+    Services.prefs.setStringPref('zen.tidy.engine', 'apple');
+    Services.prefs.setBoolPref('zen.tidy.apple-enabled-v7', true);
+  }
+  async function configureApple() {
+    const picker = Cc['@mozilla.org/filepicker;1'].createInstance(Ci.nsIFilePicker);
+    picker.init(window.browsingContext, 'Choose zen-tidy-apple from the extracted mod folder', Ci.nsIFilePicker.modeOpen);
+    if (await new Promise(resolve => picker.open(resolve)) !== Ci.nsIFilePicker.returnOK) return false;
+    if (picker.file.leafName !== 'zen-tidy-apple' || !picker.file.isExecutable())
+      throw new Error('Select the executable named zen-tidy-apple inside apple-intelligence.');
+    Services.prefs.setStringPref('zen.tidy.apple-helper', picker.file.path);
+    Services.prefs.setStringPref('zen.tidy.engine', 'apple');
+    return true;
+  }
+  async function applePlan(tabs) {
+    if (tabs.length > 40) throw new Error('Apple Intelligence supports up to 40 tabs per workspace.');
+    const {Subprocess} = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');
+    const process = await Subprocess.call({command:Services.prefs.getStringPref('zen.tidy.apple-helper'), arguments:[]});
+    appleProcess = process;
+    let expired = false;
+    const timeout = setTimeout(() => { expired = true; process.kill(); }, 60000);
+    try {
+      if (destroyed) { process.kill(); throw new Error('Grouping cancelled.'); }
+      await process.stdin.write(JSON.stringify({tabs:tabs.map((tab,id) => ({id,
+        title:String(tab.label || '').slice(0,100), url:aiURL(tab.linkedBrowser?.currentURI?.spec).slice(0,120)
+      }))}));
+      await process.stdin.close();
+      let output = '';
+      while (true) {
+        const chunk = await process.stdout.readString();
+        if (!chunk) break;
+        output += chunk;
+        if (output.length > 100000) throw new Error('Unexpected Apple Intelligence response size.');
+      }
+      const {exitCode} = await process.wait();
+      if (expired) throw new Error('Apple Intelligence timed out. Try fewer tabs.');
+      if (exitCode !== 0) throw new Error('Apple Intelligence helper could not run. Re-select it from Tidy settings.');
+      const result = JSON.parse(output);
+      if (result.error || !result.available) throw new Error(result.error || 'Apple Intelligence is unavailable.');
+      return parseAIPlan(result, tabs);
+    } finally {
+      clearTimeout(timeout);
+      process.kill();
+      if (appleProcess === process) appleProcess = null;
+    }
+  }
   const KEY_ORIGIN = 'https://zen-tidy-tabs.invalid';
   const KEY_REALM = 'OpenAI API';
   async function storedKey() {
@@ -192,6 +260,8 @@
         item.addEventListener('command', () => { if (!busy) Promise.resolve().then(action).catch(report); });
         settingsMenu.append(item);
       };
+      add('Apple Intelligence helper…', configureApple);
+      add('Use Apple Intelligence', () => Services.prefs.setStringPref('zen.tidy.engine','apple'));
       add('OpenAI settings…', configureAI);
       add('Use OpenAI', () => Services.prefs.setStringPref('zen.tidy.engine','openai'));
       add('Use local rules', () => Services.prefs.setStringPref('zen.tidy.engine','rules'));
@@ -218,7 +288,11 @@
           text:{format:{type:'json_schema',name:'tab_groups',strict:true,schema}}
         })
       });
-      if (!response.ok) throw new Error(`OpenAI request failed (${response.status}). Check your API key, model and API balance. Tabs were not changed.`);
+      if (!response.ok) {
+        let detail = null;
+        try { detail = await response.json(); } catch {}
+        throw new Error(apiError(response.status, detail, response.headers.get('retry-after') || ''));
+      }
       const body = await response.json();
       if (body.status !== 'completed') throw new Error('OpenAI did not complete the grouping. Tabs were not changed.');
       const content = (body.output || []).flatMap(item => item.content || []);
@@ -303,7 +377,10 @@
   }
   async function tidy(strip) {
     if (busy || strip !== activeStrip() || tabsIn(strip).length < 5) return;
-    const engine = Services.prefs.getStringPref('zen.tidy.engine', 'openai');
+    const engine = Services.prefs.getStringPref('zen.tidy.engine', 'apple');
+    if (engine === 'apple' && !Services.prefs.getStringPref('zen.tidy.apple-helper', '')) {
+      if (!await configureApple()) return;
+    }
     let key;
     if (engine === 'openai') {
       let login = await storedKey();
@@ -321,8 +398,8 @@
     s.tidyButton.setAttribute('aria-busy', 'true');
     try {
       // Let the wave play while retaining an exact scope for this click.
-      let waiting = engine === 'openai';
-      const pending = waiting ? aiPlan(snapshot, key).then(value => ({value}), error => ({error})).finally(() => { waiting = false; }) : null;
+      let waiting = engine === 'openai' || engine === 'apple';
+      const pending = waiting ? (engine === 'apple' ? applePlan(snapshot) : aiPlan(snapshot, key)).then(value => ({value}), error => ({error})).finally(() => { waiting = false; }) : null;
       await animateTidy(s, () => waiting);
       const result = pending ? await pending : null;
       if (destroyed || !strip.isConnected || strip !== activeStrip()) return;
@@ -519,10 +596,10 @@
   function destroy() {
     destroyed = true; abort.abort(); observer?.disconnect(); clearTimeout(timer); clearTimeout(startupTimer);
     for (const s of states.values()) { removeHeaders(s); unmountControl(s); }
-    states.clear(); style.remove(); settingsMenu?.remove(); requestController?.abort();
+    states.clear(); style.remove(); settingsMenu?.remove(); requestController?.abort(); appleProcess?.kill();
     if (gBrowser.addTab === patchedAddTab) gBrowser.addTab = originalAddTab;
     if (window.ZenTidyTabs?.destroy === destroy) delete window.ZenTidyTabs;
   }
-  window.ZenTidyTabs = { destroy, configureAI, tidy:() => { const strip = activeStrip(); if (strip) return tidy(strip); } };
+  window.ZenTidyTabs = { destroy, configureAI, configureApple, tidy:() => { const strip = activeStrip(); if (strip) return tidy(strip); } };
   init();
 })();
