@@ -1,0 +1,12 @@
+{
+  "id": "zen-tidy-tabs",
+  "name": "Tidy Tabs",
+  "description": "Arc-inspired temporary groups, local rules, wave animation and native Zen folders.",
+  "version": "0.1.0",
+  "author": "Artem",
+  "style": "chrome.css",
+  "readme": "README.md",
+  "tags": ["tabs", "sidebar", "productivity"],
+  "fork": ["zen"],
+  "scripts": {"tidy-tabs.uc.js": {"include": ["chrome://browser/content/browser.xhtml"]}}
+}
