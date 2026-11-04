@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Apple Intelligence tab grouping with native Zen folders.
 // @include        main
-// @version        0.7.0
+// @version        0.7.1
 // ==/UserScript==
 (() => {
   'use strict';
@@ -113,24 +113,13 @@
   const NS = 'http://www.w3.org/1999/xhtml';
   const states = new Map();
   const abort = new AbortController();
-  let observer, timer, startupTimer, originalAddTab, patchedAddTab, settingsMenu, requestController, appleProcess, destroyed = false, busy = false;
+  let observer, timer, startupTimer, originalAddTab, patchedAddTab, settingsMenu, groupMenu, requestController, appleProcess, destroyed = false, busy = false;
   const node = (tag, cls, text) => {
     const el = document.createElementNS(NS, tag);
     if (cls) el.className = cls;
     if (text) el.textContent = text;
     return el;
   };
-  function button(text, title, fn) {
-    const b = node('button', 'ztt-button' + (text === '×' ? ' ztt-close' : ''), text);
-    b.type = 'button'; b.title = title; b.setAttribute('aria-label', title);
-    const icon = node('span', 'ztt-icon');
-    icon.setAttribute('aria-hidden', 'true');
-    icon.style.maskImage = 'url("' + ICONS[text === '⊞' ? 'folder' : 'close'] + '")';
-    b.textContent = ''; b.append(icon);
-    b.addEventListener('click', e => { e.stopPropagation(); Promise.resolve().then(fn).catch(report); });
-    b.addEventListener('dblclick', e => e.stopPropagation());
-    return b;
-  }
   function report(error) {
     console.error('[Zen Tidy Tabs]', error);
     Services.prompt.alert(window, 'Tidy Tabs', 'Unable to complete action: ' + error.message);
@@ -142,14 +131,35 @@
   }
   const tabsIn = strip => [...strip.children].filter(t => eligible(t, strip));
   function getState(strip) {
-    if (!states.has(strip)) states.set(strip, { assignments: new Map(), revealed: new Set(), headers: [], separator: null, tidyButton: null });
+    if (!states.has(strip)) states.set(strip, { assignments: new Map(), revealed: new Set(), collapsed: new Set(), hiddenTabs: new Set(), headers: [], separator: null, tidyButton: null });
     return states.get(strip);
   }
   function members(strip, name) {
     const s = getState(strip);
     return tabsIn(strip).filter(t => s.assignments.get(t) === name);
   }
-  function removeHeaders(s) { s.headers.forEach(h => h.remove()); s.headers = []; }
+  function removeHeaders(s) {
+    s.headers.forEach(h => h.remove()); s.headers = [];
+    for (const tab of s.hiddenTabs) tab.removeAttribute('ztt-collapsed');
+    s.hiddenTabs.clear();
+  }
+  function openGroupMenu(event, strip, name) {
+    event.preventDefault(); event.stopPropagation();
+    groupMenu?.remove();
+    groupMenu = document.createXULElement('menupopup');
+    for (const [label, icon, action] of [
+      ['Create pinned folder', ICONS.folder, () => folder(strip, name)],
+      ['Close group', ICONS.close, () => clear(strip, name)]
+    ]) {
+      const item = document.createXULElement('menuitem');
+      item.setAttribute('label',label); item.setAttribute('image',icon);
+      item.classList.add('menuitem-iconic');
+      item.addEventListener('command', () => Promise.resolve().then(action).catch(report));
+      groupMenu.append(item);
+    }
+    document.getElementById('mainPopupSet').append(groupMenu);
+    groupMenu.openPopupAtScreen(event.screenX,event.screenY,true);
+  }
   function clear(strip, name) {
     if (busy || strip !== activeStrip()) return;
     const tabs = name === undefined ? tabsIn(strip) : members(strip, name);
@@ -162,6 +172,7 @@
     const tabs = members(strip, name);
     if (!tabs.length) return;
     if (typeof gZenFolders?.createFolder !== 'function') throw new Error('This Zen version does not support native folders.');
+    for (const tab of tabs) tab.removeAttribute('ztt-collapsed');
     gZenFolders.createFolder(tabs, { label: name, workspaceId: gZenWorkspaces.activeWorkspace });
     schedule();
   }
@@ -416,7 +427,7 @@
       }
       const loose = tabs.filter(tab => !grouped.has(tab));
       s.assignments.clear();
-      s.revealed.clear();
+      s.revealed.clear(); s.collapsed.clear();
       for (const [name, items] of groups) for (const tab of items) s.assignments.set(tab, name);
       removeHeaders(s);
       moveInOrder(strip, loose.concat([...groups.values()].flat()));
@@ -461,6 +472,8 @@
   function render(strip) {
     const s = getState(strip);
     mountControl(strip, s);
+    for (const tab of s.hiddenTabs) tab.removeAttribute('ztt-collapsed');
+    s.hiddenTabs.clear();
     for (const tab of s.assignments.keys()) if (!eligible(tab, strip)) s.assignments.delete(tab);
     // A group is a snapshot from the last Tidy click. New tabs stay above
     // all headers, even when Zen inserts them next to the selected tab.
@@ -484,21 +497,36 @@
           header = node('div', 'ztt-header');
           header.dataset.zttGroup = name;
           const label = node('span', 'ztt-label', name);
-          header.append(label,
-            button('⊞', 'Create pinned folder: ' + name, () => folder(strip, name)),
-            button('×', 'Close group: ' + name, () => clear(strip, name)));
+          const chevron = node('span', 'ztt-chevron');
+          chevron.setAttribute('aria-hidden','true');
+          header.append(label, chevron);
+          header.setAttribute('role','button'); header.tabIndex = 0;
+          const toggle = () => {
+            if (busy) return;
+            if (s.collapsed.has(name)) s.collapsed.delete(name); else s.collapsed.add(name);
+            render(strip);
+          };
+          header.addEventListener('click', event => { if (event.button === 0) toggle(); });
+          header.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); toggle(); }
+          });
+          header.addEventListener('contextmenu', event => openGroupMenu(event,strip,name));
           if (!s.revealed.has(name)) {
             s.revealed.add(name);
             label.classList.add('ztt-title-enter');
             label.style.animationDelay = Math.min(revealIndex++ * 55, 165) + 'ms';
-            label.addEventListener('animationend', () => {
+            label.addEventListener('animationend', event => {
+              if (event.animationName !== 'ztt-title-enter') return;
               label.classList.remove('ztt-title-enter'); label.style.removeProperty('animation-delay');
-            }, { once:true });
+            });
           }
         }
+        header.setAttribute('aria-expanded', String(!s.collapsed.has(name)));
+        header.setAttribute('aria-label', name);
         if (header.nextElementSibling !== tab) strip.insertBefore(header, tab);
         kept.push(header);
       }
+      if (name && s.collapsed.has(name)) { tab.setAttribute('ztt-collapsed','true'); s.hiddenTabs.add(tab); }
       lastName = name;
     }
     for (const header of previous) if (!kept.includes(header)) header.remove();
@@ -521,19 +549,14 @@
       box-sizing:border-box; min-width:0; margin:3px 5px 0; padding:0 5px;
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
     .ztt-header { height:22px; min-height:22px; margin-top:3px; }
-    .ztt-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
-    .ztt-button { appearance:none; border:0; border-radius:6px; background:transparent;
-      color:inherit; font:inherit; font-size:11px; font-weight:600; padding:5px 6px;
-      min-width:22px; min-height:20px; cursor:pointer; white-space:nowrap; }
-    .ztt-icon { display:block; width:14px; height:14px; background:currentColor; mask-size:contain; mask-repeat:no-repeat; mask-position:center; }
-    .ztt-header .ztt-button:not(.ztt-close) .ztt-icon { width:19px; height:15px; }
-    .ztt-header .ztt-close .ztt-icon { width:9px; height:9px; margin:auto; }
-    .ztt-header .ztt-close { width:20px; min-width:20px; padding:2px!important; display:grid; place-items:center; }
-    .ztt-button:hover { background:transparent; box-shadow:none; }
-    .ztt-button:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); outline-offset:1px; }
-    .ztt-button[hidden] { display:none; }
-    .ztt-header .ztt-button { opacity:0; transition:opacity .15s; font-size:17px; padding:2px 5px; }
-    .ztt-header:hover .ztt-button,.ztt-header:focus-within .ztt-button { opacity:.8; }
+    .ztt-label { flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
+    .ztt-header { cursor:pointer; justify-content:flex-start; }
+    .ztt-header:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); outline-offset:1px; border-radius:4px; }
+    .ztt-chevron { width:5px; height:5px; flex:0 0 5px; border-right:1.4px solid currentColor;
+      border-bottom:1.4px solid currentColor; transform:translateY(-2px) rotate(45deg); opacity:.55;
+      transition:transform .16s ease; margin-left:2px; }
+    .ztt-header[aria-expanded='false'] .ztt-chevron { transform:rotate(-45deg); }
+    tab[ztt-collapsed='true'] { display:none!important; }
     .ztt-native-separator > .ztt-tidy {
       color:inherit!important; font-size:10px; font-weight:500;
       opacity:1!important; margin:0!important; padding:0 0 0 8px!important;
@@ -570,20 +593,42 @@
       color:var(--zen-pinned-separator-color); }
     .ztt-native-separator.ztt-working > toolbarbutton { pointer-events:auto; }
     .ztt-native-separator.ztt-working > toolbarbutton > :is(.toolbarbutton-icon,.toolbarbutton-text) { opacity:.5; }
-    .ztt-title-enter { animation:ztt-title-enter 420ms cubic-bezier(.2,.7,.2,1) both; }
+    .ztt-title-enter {
+      position:relative; -webkit-text-fill-color:transparent;
+      background:linear-gradient(90deg,currentColor 0%,currentColor 35%,#6a9ee9 42%,#c8a9e8 46%,#e7c777 50%,#d97dbd 54%,currentColor 62%,currentColor 100%);
+      background-size:300% 100%; background-repeat:no-repeat; background-clip:text;
+      animation:ztt-title-enter 1200ms ease-out both;
+    }
+    .ztt-title-enter::after {
+      content:''; position:absolute; left:0; top:50%; width:min(72px,60%); height:6px;
+      border-radius:2px; background:currentColor; transform:translateY(-50%);
+      animation:ztt-title-placeholder 1200ms ease-out both;
+      animation-delay:inherit;
+    }
     @keyframes ztt-title-enter {
-      from { opacity:0; transform:translateY(4px); filter:blur(2px); }
-      to { opacity:.68; transform:translateY(0); filter:blur(0); }
+      0%,18% { opacity:.35; background-position:100% 0; clip-path:inset(0); -webkit-text-fill-color:transparent; background-size:0% 100%; }
+      19% { opacity:.68; background-position:100% 0; background-size:300% 100%; }
+      100% { opacity:.68; background-position:0% 0; background-size:300% 100%; }
+    }
+    @keyframes ztt-title-placeholder {
+      0%,12% { opacity:.35; }
+      22%,100% { opacity:0; }
     }
     :root:not([zen-sidebar-expanded='true']) .ztt-header,
     :root:not([zen-sidebar-expanded='true']) .ztt-tidy { display:none; }
-    @media(prefers-reduced-motion:reduce) { .ztt-title-enter,.ztt-wave { animation:none!important; } }
+    @media(prefers-reduced-motion:reduce) { .ztt-title-enter,.ztt-title-enter::after,.ztt-wave { animation:none!important; } .ztt-chevron { transition:none; } .ztt-title-enter { background:none; -webkit-text-fill-color:currentColor; } .ztt-title-enter::after { display:none; } }
   `;
   function init() {
     if (destroyed) return;
     if (!window.gBrowser || !window.gZenWorkspaces) { startupTimer = setTimeout(init, 250); return; }
     document.documentElement.append(style);
     installInsertionHook();
+    gBrowser.tabContainer.addEventListener('TabSelect', event => {
+      for (const [strip,s] of states) {
+        const name = s.assignments.get(event.target);
+        if (name && s.collapsed.delete(name)) render(strip);
+      }
+    }, {signal:abort.signal});
     for (const event of ['TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
       gBrowser.tabContainer.addEventListener(event, schedule, { signal:abort.signal });
     }
@@ -596,7 +641,7 @@
   function destroy() {
     destroyed = true; abort.abort(); observer?.disconnect(); clearTimeout(timer); clearTimeout(startupTimer);
     for (const s of states.values()) { removeHeaders(s); unmountControl(s); }
-    states.clear(); style.remove(); settingsMenu?.remove(); requestController?.abort(); appleProcess?.kill();
+    states.clear(); style.remove(); settingsMenu?.remove(); groupMenu?.remove(); requestController?.abort(); appleProcess?.kill();
     if (gBrowser.addTab === patchedAddTab) gBrowser.addTab = originalAddTab;
     if (window.ZenTidyTabs?.destroy === destroy) delete window.ZenTidyTabs;
   }

@@ -2,7 +2,7 @@
   "id": "zen-tidy-tabs",
   "name": "Tidy Tabs",
   "description": "On-device Apple Intelligence grouping, native Zen folders and optional OpenAI or rules.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "author": "Artem",
   "style": "chrome.css",
   "readme": "README.md",
