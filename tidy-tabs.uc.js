@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Local rule-based temporary tab groups with native Zen folders.
 // @include        main
-// @version        0.1.0
+// @version        0.2.0
 // ==/UserScript==
 (() => {
   'use strict';
@@ -10,9 +10,9 @@
   const RULES = [
     { name: 'Arc Browser', domains: ['arc.net', 'thebrowser.company'], words: ['arc browser', 'act ii of arc'] },
     { name: 'Apple', domains: ['apple.com', '9to5mac.com', 'macrumors.com'], words: ['apple', 'iphone', 'macbook', 'shareplay', 'vision pro'] },
-    { name: 'Дизайн', domains: ['figma.com', 'dribbble.com', 'behance.net', 'mobbin.com', 'pinterest.com'], words: ['design', 'дизайн', 'ux', 'ui', 'typography', 'типографіка'] },
+    { name: 'Дизайн', domains: ['figma.com', 'dribbble.com', 'behance.net', 'mobbin.com', 'pinterest.com'], words: ['design', 'дизайн', 'ux', 'ui', 'typography', 'типографіка', 'user interface', 'интерфейс пользователя', 'інтерфейс користувача'] },
     { name: 'Розробка', domains: ['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org'], words: ['javascript', 'typescript', 'react', 'css', 'програмування'] },
-    { name: 'Ігри', domains: ['steampowered.com', 'steamcommunity.com', 'gog.com', 'epicgames.com'], words: ['videogames', 'video games', 'gaming', 'відеоігри'] },
+    { name: 'Ігри', domains: ['steampowered.com', 'steamcommunity.com', 'gog.com', 'epicgames.com', 'minecraft.net', 'minecraft.wiki', 'roblox.com'], words: ['videogames', 'video games', 'gaming', 'відеоігри', 'minecraft', 'майнкрафт', 'roblox'] },
     { name: 'Відео й музика', domains: ['youtube.com', 'youtu.be', 'spotify.com', 'soundcloud.com', 'vimeo.com'], words: [] },
     { name: 'Покупки', domains: ['amazon.com', 'ebay.com', 'etsy.com', 'rozetka.com.ua'], words: [] },
   ];
@@ -34,6 +34,25 @@
     }
     try { return baseDomain(host) || host; } catch { return host; }
   }
+  function groupTabs(tabs, describe, baseDomain) {
+    const candidates = new Map();
+    for (const tab of tabs) {
+      const name = classify(describe(tab), baseDomain);
+      if (!candidates.has(name)) candidates.set(name, []);
+      candidates.get(name).push(tab);
+    }
+    const groups = new Map();
+    const grouped = new Set();
+    for (const [name, items] of candidates) {
+      if (name !== 'Інше' && items.length >= 2) {
+        groups.set(name, items); items.forEach(tab => grouped.add(tab));
+      }
+    }
+    // Keep unrelated singletons together, rather than one heading per website.
+    const rest = tabs.filter(tab => !grouped.has(tab));
+    if (rest.length >= 2) groups.set('Інше', rest);
+    return { groups, loose: rest.length < 2 ? rest : [] };
+  }
   function eligible(tab, strip) {
     return tab?.localName === 'tab' && tab.parentElement === strip &&
       !tab.pinned && !tab.closing && !tab.hasAttribute('pinned') &&
@@ -41,7 +60,7 @@
       !tab.hasAttribute('zen-glance-tab') && !tab.group;
   }
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { classify, eligible, RULES }; return;
+    module.exports = { classify, groupTabs, eligible, RULES }; return;
   }
   if (location.href !== 'chrome://browser/content/browser.xhtml') return;
   window.ZenTidyTabs?.destroy();
@@ -87,7 +106,7 @@
   }
   const tabsIn = strip => [...strip.children].filter(t => eligible(t, strip));
   function getState(strip) {
-    if (!states.has(strip)) states.set(strip, { assignments: new Map(), original: null, headers: [], bar: null });
+    if (!states.has(strip)) states.set(strip, { assignments: new Map(), headers: [], separator: null, tidyButton: null });
     return states.get(strip);
   }
   function members(strip, name) {
@@ -126,63 +145,66 @@
     if (busy || strip !== activeStrip() || !tabsIn(strip).length) return;
     const s = getState(strip);
     busy = true;
-    s.bar.classList.add('ztt-working');
-    s.bar.setAttribute('aria-busy', 'true');
+    if (!mountControl(strip, s)) { busy = false; return; }
+    s.separator.classList.add('ztt-working');
+    s.tidyButton.disabled = true;
+    s.tidyButton.setAttribute('aria-busy', 'true');
     try {
       // Let the wave play while retaining an exact scope for this click.
       await new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 650));
       if (destroyed || !strip.isConnected || strip !== activeStrip()) return;
       const tabs = tabsIn(strip);
-      if (!s.original) s.original = [...tabs];
-      const buckets = new Map();
+      const { groups, loose } = groupTabs(tabs,
+        tab => ({ url: tab.linkedBrowser?.currentURI?.spec, title: tab.label }),
+        host => Services.eTLD.getBaseDomainFromHost(host));
       s.assignments.clear();
-      for (const tab of tabs) {
-        const name = classify({ url: tab.linkedBrowser?.currentURI?.spec, title: tab.label }, host => Services.eTLD.getBaseDomainFromHost(host));
-        if (!buckets.has(name)) buckets.set(name, []);
-        buckets.get(name).push(tab); s.assignments.set(tab, name);
-      }
+      for (const [name, items] of groups) for (const tab of items) s.assignments.set(tab, name);
       removeHeaders(s);
-      moveInOrder(strip, [...buckets.values()].flat());
+      moveInOrder(strip, [...groups.values()].flat().concat(loose));
     } finally {
       busy = false;
-      s.bar.classList.remove('ztt-working'); s.bar.removeAttribute('aria-busy');
+      s.separator?.classList.remove('ztt-working');
+      if (s.tidyButton) { s.tidyButton.disabled = false; s.tidyButton.removeAttribute('aria-busy'); }
       if (!destroyed) render(strip);
     }
   }
-  function undo(strip) {
-    if (busy || strip !== activeStrip()) return;
-    const s = getState(strip);
-    if (!s.original) return;
-    busy = true;
-    try {
-      removeHeaders(s);
-      moveInOrder(strip, s.original);
-      s.assignments.clear(); s.original = null;
-    } finally { busy = false; render(strip); }
+  function unmountControl(s) {
+    s.tidyButton?.remove();
+    s.separator?.classList.remove('ztt-native-separator', 'ztt-working');
+    s.tidyButton = null; s.separator = null;
+  }
+  function mountControl(strip, s) {
+    const workspace = strip.closest('zen-workspace') || gZenWorkspaces.activeWorkspaceElement;
+    const clearButton = workspace?.querySelector('.pinned-tabs-container-separator > .zen-workspace-close-unpinned-tabs-button');
+    if (!clearButton) { unmountControl(s); return false; }
+    const separator = clearButton.parentElement;
+    if (s.separator === separator && s.tidyButton?.isConnected) return true;
+    unmountControl(s);
+    s.separator = separator;
+    separator.classList.add('ztt-native-separator');
+    const tidyButton = document.createXULElement('toolbarbutton');
+    tidyButton.className = 'ztt-tidy';
+    tidyButton.setAttribute('label', 'Tidy');
+    tidyButton.setAttribute('tooltiptext', 'Згрупувати вкладки за темою та сайтом');
+    tidyButton.setAttribute('aria-label', 'Згрупувати вкладки');
+    tidyButton.addEventListener('command', () => { tidy(strip).catch(report); });
+    tidyButton.addEventListener('dblclick', e => e.stopPropagation());
+    separator.insertBefore(tidyButton, clearButton);
+    s.tidyButton = tidyButton;
+    return true;
   }
   function render(strip) {
     const s = getState(strip);
-    if (!s.bar?.isConnected) {
-      s.bar = node('div', 'ztt-bar');
-      s.bar.setAttribute('role', 'toolbar'); s.bar.setAttribute('aria-label', 'Керування вкладками');
-      const wave = node('span', 'ztt-wave'); wave.setAttribute('aria-hidden', 'true');
-      s.bar.append(wave,
-        button('⌁ Tidy', 'Згрупувати вкладки за темою та сайтом', () => tidy(strip)),
-        button('Clear', 'Закрити всі вільні вкладки цього простору', () => clear(strip)),
-        button('↶', 'Скасувати сортування', () => undo(strip)));
-      strip.prepend(s.bar);
-    }
-    s.bar.lastElementChild.hidden = !s.original;
+    mountControl(strip, s);
     for (const tab of s.assignments.keys()) if (!eligible(tab, strip)) s.assignments.delete(tab);
     removeHeaders(s);
     let lastName;
     for (const tab of tabsIn(strip)) {
       const name = s.assignments.get(tab);
-      if (name && name !== lastName) {
+      if (name && name !== lastName && members(strip, name).length >= 2) {
         const header = node('div', 'ztt-header');
         const label = node('span', 'ztt-label', name);
-        const count = node('span', 'ztt-count', String(members(strip, name).length));
-        header.append(label, count,
+        header.append(label,
           button('⊞', 'Створити закріплену папку «' + name + '»', () => folder(strip, name)),
           button('×', 'Закрити вкладки групи «' + name + '»', () => clear(strip, name)));
         strip.insertBefore(header, tab); s.headers.push(header);
@@ -195,20 +217,18 @@
     timer = setTimeout(() => {
       if (destroyed || busy) return;
       if (gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
-      for (const [strip, s] of states) if (!strip.isConnected) { removeHeaders(s); states.delete(strip); }
+      for (const [strip, s] of states) if (!strip.isConnected) { removeHeaders(s); unmountControl(s); states.delete(strip); }
       const strip = activeStrip();
       if (strip) render(strip);
     }, 100);
   }
   const style = node('style');
   style.textContent = `
-    .ztt-bar,.ztt-header { display:flex; align-items:center; gap:5px; flex:none;
+    .ztt-header { display:flex; align-items:center; gap:5px; flex:none;
       box-sizing:border-box; min-width:0; margin:4px 5px; padding:3px 5px;
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
-    .ztt-bar { min-height:28px; opacity:.78; }
     .ztt-header { min-height:32px; margin-top:13px; animation:ztt-appear .22s ease-out; }
     .ztt-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
-    .ztt-count { font-size:10px; opacity:.45; margin-inline:2px; }
     .ztt-button { appearance:none; border:0; border-radius:6px; background:transparent;
       color:inherit; font:inherit; font-size:11px; font-weight:600; padding:5px 6px;
       min-width:24px; min-height:26px; cursor:pointer; white-space:nowrap; }
@@ -218,17 +238,27 @@
     .ztt-button[hidden] { display:none; }
     .ztt-header .ztt-button { opacity:0; transition:opacity .15s; font-size:17px; padding:2px 5px; }
     .ztt-header:hover .ztt-button,.ztt-header:focus-within .ztt-button { opacity:.8; }
-    .ztt-wave { flex:1; min-width:16px; height:14px; opacity:.32; position:relative; overflow:hidden; }
-    .ztt-wave::before { content:''; position:absolute; inset:6px 0 auto; height:1px; background:currentColor; }
-    .ztt-working .ztt-wave::before { inset:0 -24px 0 0; height:14px;
+    .ztt-tidy { appearance:none; color:inherit; background:transparent; border:0;
+      border-radius:4px; font:inherit; padding:0 4px; margin:0 3px; opacity:.65;
+      -moz-window-dragging:no-drag; cursor:pointer;
+      list-style-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath d='M14 3l-3 9M7 11l8 3-2 6-9-3zM7 14l-1 3M10 15l-1 3' fill='none' stroke='context-fill' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      -moz-context-properties:fill; fill:currentColor; }
+    .ztt-tidy > .toolbarbutton-icon { width:14px; height:14px; margin-inline-end:4px; }
+    .ztt-tidy:hover { opacity:1; background:color-mix(in srgb,currentColor 8%,transparent); }
+    .ztt-tidy:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); }
+    .ztt-native-separator.ztt-working > toolbarseparator {
+      position:relative; overflow:hidden; border-color:transparent!important;
+      min-height:14px; background:none!important; }
+    .ztt-native-separator.ztt-working > toolbarseparator::after {
+      content:''; position:absolute; top:calc(50% - 7px); left:0; right:-24px; height:14px;
+      background:currentColor; opacity:.3;
       mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='14' viewBox='0 0 24 14'%3E%3Cpath d='M0 7Q6 0 12 7T24 7' fill='none' stroke='black' stroke-width='1.7'/%3E%3C/svg%3E") repeat-x center;
       animation:ztt-wave .55s linear infinite; }
-    .ztt-working { pointer-events:none; }
     @keyframes ztt-wave { to { transform:translateX(-24px); } }
     @keyframes ztt-appear { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
     :root:not([zen-sidebar-expanded='true']) .ztt-header,
-    :root:not([zen-sidebar-expanded='true']) .ztt-bar { display:none; }
-    @media(prefers-reduced-motion:reduce) { .ztt-header,.ztt-wave::before { animation:none!important; } }
+    :root:not([zen-sidebar-expanded='true']) .ztt-tidy { display:none; }
+    @media(prefers-reduced-motion:reduce) { .ztt-header,.ztt-native-separator > toolbarseparator::after { animation:none!important; } }
   `;
   function init() {
     if (destroyed) return;
@@ -245,7 +275,7 @@
   }
   function destroy() {
     destroyed = true; abort.abort(); observer?.disconnect(); clearTimeout(timer); clearTimeout(startupTimer);
-    for (const s of states.values()) { removeHeaders(s); s.bar?.remove(); }
+    for (const s of states.values()) { removeHeaders(s); unmountControl(s); }
     states.clear(); style.remove();
     if (window.ZenTidyTabs?.destroy === destroy) delete window.ZenTidyTabs;
   }
