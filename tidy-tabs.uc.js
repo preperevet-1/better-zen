@@ -2,24 +2,25 @@
 // @name           Zen Tidy Tabs
 // @description    Local rule-based temporary tab groups with native Zen folders.
 // @include        main
-// @version        0.2.0
+// @version        0.3.0
 // ==/UserScript==
 (() => {
   'use strict';
+  const ICONS = {"broom": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgY2xhc3M9Imx1Y2lkZSBsdWNpZGUtYnJvb20tc3BhcmtsZXMgcHJldmlldy1pY29uIj48cGF0aCBkPSJNMTEgMnYyIi8+PHBhdGggZD0iTTEyIDNoLTIiLz48cGF0aCBkPSJNMTMuNSAxMC41IDIyIDIiLz48cGF0aCBkPSJNMTQuNzM0IDEzLjg0MWEyIDIgMCAwMC0uMzE0LTIuNDJMMTIuNTggOS41OGEyIDIgMCAwMC0yLjQyMS0uMzE0bC03LjY1NyA0LjQ2MUExIDEgMCAwMDIuMyAxNS4zbDYuNDAzIDYuNDAzYTEgMSAwIDAwMS41NzEtLjIwNHoiLz48cGF0aCBkPSJNMjAgMTV2NCIvPjxwYXRoIGQ9Ik0yMiAxN2gtNCIvPjxwYXRoIGQ9Ik00IDR2NCIvPjxwYXRoIGQ9Im01IDE4IDItMiIvPjxwYXRoIGQ9Ik02IDZIMiIvPjxwYXRoIGQ9Im03LjY5OSAxMC43IDUuNjAyIDUuNjAxIi8+PC9zdmc+", "close": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNS40OTE5IDE1LjUwMDgiPjxwYXRoIGQ9Ik0xNC4wMDE0IDAuMjcwNTI1TDAuMjU3NzQgMTQuMDEyMUMtMC4wNjk2NjQgMTQuMzM5NS0wLjA4MDAxNDggMTQuOTExMyAwLjI1Nzc0IDE1LjI0OTFDMC42MDM3MzQgMTUuNTg0NyAxLjE2NTE4IDE1LjU4NDcgMS41MDI5NCAxNS4yNDkxTDE1LjIzNjMgMS41MTU3MkMxNS41NzE5IDEuMTc3OTcgMTUuNTgyMyAwLjYwNjE2OSAxNS4yMzYzIDAuMjcwNTI1QzE0Ljg4ODItMC4wNTY4Nzg5IDE0LjMzNzEtMC4wNjcyMjk3IDE0LjAwMTQgMC4yNzA1MjVaTTE1LjIzNjMgMTQuMDEyMUwxLjUwMjk0IDAuMjcwNTI1QzEuMTY1MTgtMC4wNTY4Nzg5IDAuNTkzMzg0LTAuMDY3MjI5NyAwLjI1Nzc0IDAuMjcwNTI1Qy0wLjA2OTY2NCAwLjYxNjUxOS0wLjA2OTY2NCAxLjE3Nzk3IDAuMjU3NzQgMS41MTU3MkwxNC4wMDE0IDE1LjI0OTFDMTQuMzI2NyAxNS41ODQ3IDE0Ljg5ODUgMTUuNTg0NyAxNS4yMzYzIDE1LjI0OTFDMTUuNTcxOSAxNC45MDEgMTUuNTcxOSAxNC4zMzk1IDE1LjIzNjMgMTQuMDEyMVoiLz48L3N2Zz4=", "folder": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTMgN2g2bDIgMmgxMHYxMUgzek0zIDdWNGg2bDIgM00xNiAxMXY2TTEzIDE0aDYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMS43IiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48L3N2Zz4="};
   // First matching rule wins. Edit names/domains/words to customize.
   const RULES = [
     { name: 'Arc Browser', domains: ['arc.net', 'thebrowser.company'], words: ['arc browser', 'act ii of arc'] },
     { name: 'Apple', domains: ['apple.com', '9to5mac.com', 'macrumors.com'], words: ['apple', 'iphone', 'macbook', 'shareplay', 'vision pro'] },
-    { name: 'Дизайн', domains: ['figma.com', 'dribbble.com', 'behance.net', 'mobbin.com', 'pinterest.com'], words: ['design', 'дизайн', 'ux', 'ui', 'typography', 'типографіка', 'user interface', 'интерфейс пользователя', 'інтерфейс користувача'] },
-    { name: 'Розробка', domains: ['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org'], words: ['javascript', 'typescript', 'react', 'css', 'програмування'] },
-    { name: 'Ігри', domains: ['steampowered.com', 'steamcommunity.com', 'gog.com', 'epicgames.com', 'minecraft.net', 'minecraft.wiki', 'roblox.com'], words: ['videogames', 'video games', 'gaming', 'відеоігри', 'minecraft', 'майнкрафт', 'roblox'] },
-    { name: 'Відео й музика', domains: ['youtube.com', 'youtu.be', 'spotify.com', 'soundcloud.com', 'vimeo.com'], words: [] },
-    { name: 'Покупки', domains: ['amazon.com', 'ebay.com', 'etsy.com', 'rozetka.com.ua'], words: [] },
+    { name: 'Design', domains: ['figma.com', 'dribbble.com', 'behance.net', 'mobbin.com', 'pinterest.com'], words: ['design', 'дизайн', 'ux', 'ui', 'typography', 'типографіка', 'user interface', 'интерфейс пользователя', 'інтерфейс користувача'] },
+    { name: 'Development', domains: ['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org'], words: ['javascript', 'typescript', 'react', 'css', 'програмування'] },
+    { name: 'Games', domains: ['steampowered.com', 'steamcommunity.com', 'gog.com', 'epicgames.com', 'minecraft.net', 'minecraft.wiki', 'roblox.com'], words: ['videogames', 'video games', 'gaming', 'відеоігри', 'minecraft', 'майнкрафт', 'roblox'] },
+    { name: 'Media', domains: ['youtube.com', 'youtu.be', 'spotify.com', 'soundcloud.com', 'vimeo.com'], words: [] },
+    { name: 'Shopping', domains: ['amazon.com', 'ebay.com', 'etsy.com', 'rozetka.com.ua'], words: [] },
   ];
   function classify({ url = '', title = '' }, baseDomain = host => host) {
     let parsed;
-    try { parsed = new URL(url); } catch { return 'Інше'; }
-    if (!['https:', 'http:'].includes(parsed.protocol)) return 'Інше';
+    try { parsed = new URL(url); } catch { return 'Other'; }
+    if (!['https:', 'http:'].includes(parsed.protocol)) return 'Other';
     const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
     let query = '';
     // Search queries are useful, arbitrary URL paths can create false matches.
@@ -44,13 +45,13 @@
     const groups = new Map();
     const grouped = new Set();
     for (const [name, items] of candidates) {
-      if (name !== 'Інше' && items.length >= 2) {
+      if (name !== 'Other' && items.length >= 2) {
         groups.set(name, items); items.forEach(tab => grouped.add(tab));
       }
     }
     // Keep unrelated singletons together, rather than one heading per website.
     const rest = tabs.filter(tab => !grouped.has(tab));
-    if (rest.length >= 2) groups.set('Інше', rest);
+    if (rest.length >= 2) groups.set('Other', rest);
     return { groups, loose: rest.length < 2 ? rest : [] };
   }
   function eligible(tab, strip) {
@@ -77,27 +78,17 @@
   function button(text, title, fn) {
     const b = node('button', 'ztt-button', text);
     b.type = 'button'; b.title = title; b.setAttribute('aria-label', title);
-    const icons = {
-      '⌁ Tidy': 'M14 3l-3 9M7 11l8 3-2 6-9-3zM7 14l-1 3M10 15l-1 3',
-      '⊞': 'M3 7h6l2 2h10v11H3zM3 7V4h6l2 3M16 11v6M13 14h6'
-    };
-    if (icons[text]) {
-      b.textContent = '';
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '16'); svg.setAttribute('height', '16');
-      svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('fill', 'none'); svg.setAttribute('stroke', 'currentColor');
-      svg.setAttribute('stroke-width', '1.7'); svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round');
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', icons[text]);
-      svg.append(path); b.append(svg);
-      if (text === '⌁ Tidy') b.append(document.createTextNode(' Tidy'));
-    }
+    const icon = node('span', 'ztt-icon');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.style.maskImage = 'url("' + ICONS[text === '⊞' ? 'folder' : 'close'] + '")';
+    b.textContent = ''; b.append(icon);
     b.addEventListener('click', e => { e.stopPropagation(); Promise.resolve().then(fn).catch(report); });
     b.addEventListener('dblclick', e => e.stopPropagation());
     return b;
   }
   function report(error) {
     console.error('[Zen Tidy Tabs]', error);
-    Services.prompt.alert(window, 'Tidy Tabs', 'Не вдалося завершити дію: ' + error.message);
+    Services.prompt.alert(window, 'Tidy Tabs', 'Unable to complete action: ' + error.message);
   }
   function activeStrip() {
     const ws = gZenWorkspaces.activeWorkspaceElement;
@@ -125,7 +116,7 @@
     if (busy || strip !== activeStrip()) return;
     const tabs = members(strip, name);
     if (!tabs.length) return;
-    if (typeof gZenFolders?.createFolder !== 'function') throw new Error('Ця версія Zen не має API папок.');
+    if (typeof gZenFolders?.createFolder !== 'function') throw new Error('This Zen version does not support native folders.');
     gZenFolders.createFolder(tabs, { label: name, workspaceId: gZenWorkspaces.activeWorkspace });
     schedule();
   }
@@ -142,7 +133,7 @@
     }
   }
   async function tidy(strip) {
-    if (busy || strip !== activeStrip() || !tabsIn(strip).length) return;
+    if (busy || strip !== activeStrip() || tabsIn(strip).length < 5) return;
     const s = getState(strip);
     busy = true;
     if (!mountControl(strip, s)) { busy = false; return; }
@@ -178,19 +169,23 @@
     const clearButton = workspace?.querySelector('.pinned-tabs-container-separator > .zen-workspace-close-unpinned-tabs-button');
     if (!clearButton) { unmountControl(s); return false; }
     const separator = clearButton.parentElement;
-    if (s.separator === separator && s.tidyButton?.isConnected) return true;
+    if (s.separator === separator && s.tidyButton?.isConnected) {
+      s.tidyButton.hidden = tabsIn(strip).length < 5;
+      return true;
+    }
     unmountControl(s);
     s.separator = separator;
     separator.classList.add('ztt-native-separator');
     const tidyButton = document.createXULElement('toolbarbutton');
     tidyButton.className = 'ztt-tidy';
     tidyButton.setAttribute('label', 'Tidy');
-    tidyButton.setAttribute('tooltiptext', 'Згрупувати вкладки за темою та сайтом');
-    tidyButton.setAttribute('aria-label', 'Згрупувати вкладки');
+    tidyButton.setAttribute('tooltiptext', 'Group tabs by topic and website');
+    tidyButton.setAttribute('aria-label', 'Tidy tabs');
     tidyButton.addEventListener('command', () => { tidy(strip).catch(report); });
     tidyButton.addEventListener('dblclick', e => e.stopPropagation());
     separator.insertBefore(tidyButton, clearButton);
     s.tidyButton = tidyButton;
+    tidyButton.hidden = tabsIn(strip).length < 5;
     return true;
   }
   function render(strip) {
@@ -205,8 +200,8 @@
         const header = node('div', 'ztt-header');
         const label = node('span', 'ztt-label', name);
         header.append(label,
-          button('⊞', 'Створити закріплену папку «' + name + '»', () => folder(strip, name)),
-          button('×', 'Закрити вкладки групи «' + name + '»', () => clear(strip, name)));
+          button('⊞', 'Create pinned folder: ' + name, () => folder(strip, name)),
+          button('×', 'Close group: ' + name, () => clear(strip, name)));
         strip.insertBefore(header, tab); s.headers.push(header);
       }
       lastName = name;
@@ -225,27 +220,46 @@
   const style = node('style');
   style.textContent = `
     .ztt-header { display:flex; align-items:center; gap:5px; flex:none;
-      box-sizing:border-box; min-width:0; margin:4px 5px; padding:3px 5px;
+      box-sizing:border-box; min-width:0; margin:3px 5px 0; padding:0 5px;
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
-    .ztt-header { min-height:32px; margin-top:13px; animation:ztt-appear .22s ease-out; }
+    .ztt-header { height:22px; min-height:22px; margin-top:3px; animation:ztt-appear .22s ease-out; }
     .ztt-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
     .ztt-button { appearance:none; border:0; border-radius:6px; background:transparent;
       color:inherit; font:inherit; font-size:11px; font-weight:600; padding:5px 6px;
-      min-width:24px; min-height:26px; cursor:pointer; white-space:nowrap; }
-    .ztt-button svg { vertical-align:middle; }
-    .ztt-button:hover { background:color-mix(in srgb,currentColor 12%,transparent); }
+      min-width:22px; min-height:20px; cursor:pointer; white-space:nowrap; }
+    .ztt-icon { display:block; width:14px; height:14px; background:currentColor; mask-size:contain; mask-repeat:no-repeat; mask-position:center; }
+    .ztt-button:hover { background:transparent; box-shadow:none; }
     .ztt-button:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); outline-offset:1px; }
     .ztt-button[hidden] { display:none; }
     .ztt-header .ztt-button { opacity:0; transition:opacity .15s; font-size:17px; padding:2px 5px; }
     .ztt-header:hover .ztt-button,.ztt-header:focus-within .ztt-button { opacity:.8; }
-    .ztt-tidy { appearance:none; color:inherit; background:transparent; border:0;
-      border-radius:4px; font:inherit; padding:0 4px; margin:0 3px; opacity:.65;
+    .ztt-native-separator > .ztt-tidy {
+      color:inherit!important; font-size:10px; font-weight:500;
+      opacity:1!important; margin:0!important; padding:0 0 0 8px!important;
+      border:0!important; box-shadow:none!important; outline:none;
       -moz-window-dragging:no-drag; cursor:pointer;
-      list-style-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath d='M14 3l-3 9M7 11l8 3-2 6-9-3zM7 14l-1 3M10 15l-1 3' fill='none' stroke='context-fill' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-      -moz-context-properties:fill; fill:currentColor; }
-    .ztt-tidy > .toolbarbutton-icon { width:14px; height:14px; margin-inline-end:4px; }
-    .ztt-tidy:hover { opacity:1; background:color-mix(in srgb,currentColor 8%,transparent); }
-    .ztt-tidy:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); }
+    }
+    .ztt-native-separator > toolbarbutton,
+    .ztt-native-separator > toolbarbutton:hover,
+    .ztt-native-separator > toolbarbutton:active {
+      background:none!important; border-color:transparent!important; box-shadow:none!important;
+    }
+    .ztt-native-separator > .ztt-tidy[hidden] { display:none!important; }
+    .ztt-native-separator > .ztt-tidy > .toolbarbutton-icon {
+      display:block!important; width:12px!important; height:14px!important;
+      list-style-image:none!important; background:currentColor!important;
+      mask:url("${ICONS.broom}") center / contain no-repeat!important;
+    }
+    .ztt-native-separator > .ztt-tidy:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); }
+    /* Zen draws a separate substitute line inside each hidden button.
+       Replace those segments with one continuous line over the native row. */
+    #navigator-toolbox:not([zen-has-implicit-hover="true"]) .ztt-native-separator::before {
+      content:''; position:absolute; inset-inline:9px 5px; top:50%; height:1px;
+      background:var(--zen-pinned-separator-color); pointer-events:none;
+    }
+    #navigator-toolbox:not([zen-has-implicit-hover="true"]) .ztt-native-separator > toolbarseparator {
+      background:transparent!important;
+    }
     .ztt-native-separator.ztt-working > toolbarseparator {
       position:relative; overflow:hidden; border-color:transparent!important;
       min-height:14px; background:none!important; }
