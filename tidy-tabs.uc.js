@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Local rule-based temporary tab groups with native Zen folders.
 // @include        main
-// @version        0.3.0
+// @version        0.4.0
 // ==/UserScript==
 (() => {
   'use strict';
@@ -76,7 +76,7 @@
     return el;
   };
   function button(text, title, fn) {
-    const b = node('button', 'ztt-button', text);
+    const b = node('button', 'ztt-button' + (text === '×' ? ' ztt-close' : ''), text);
     b.type = 'button'; b.title = title; b.setAttribute('aria-label', title);
     const icon = node('span', 'ztt-icon');
     icon.setAttribute('aria-hidden', 'true');
@@ -132,9 +132,57 @@
       previous = tab;
     }
   }
+  function animateTidy(s) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+    const line = s.separator.querySelector('toolbarseparator');
+    if (!line) return Promise.resolve();
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.classList.add('ztt-wave'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    svg.append(path); line.append(svg);
+    const brush = s.tidyButton.querySelector('.toolbarbutton-icon');
+    const sweep = brush?.animate([
+      { transform:'rotate(0deg)', offset:0 },
+      { transform:'rotate(24deg)', offset:0.25 },
+      { transform:'rotate(-5deg)', offset:0.65 },
+      { transform:'rotate(0deg)', offset:1 }
+    ], { duration:900, easing:'ease-in-out' });
+    return new Promise(resolve => {
+      let frame;
+      const finish = () => {
+        cancelAnimationFrame(frame); svg.remove(); sweep?.cancel();
+        s.cancelWave = null; resolve();
+      };
+      s.cancelWave = finish;
+      const start = performance.now();
+      const smooth = value => value * value * (3 - 2 * value);
+      const draw = now => {
+        if (destroyed || !line.isConnected) { finish(); return; }
+        const elapsed = now - start;
+        const strength = smooth(Math.max(0, Math.min(1, elapsed / 300, (900 - elapsed) / 300)));
+        const width = Math.max(1, line.getBoundingClientRect().width);
+        svg.setAttribute('viewBox', `0 0 ${width} 9`);
+        let d = '';
+        // A traveling sine with a smooth amplitude envelope returns to the
+        // exact same one-pixel baseline; no vertical scaling of its stroke.
+        for (let x = 0; x <= Math.ceil(width); x++) {
+          const y = 4.5 + 2.25 * strength * Math.sin(2 * Math.PI * (x / 10 + elapsed / 500));
+          d += `${x ? 'L' : 'M'}${x},${y.toFixed(3)} `;
+        }
+        path.setAttribute('d', d);
+        path.setAttribute('stroke-width', String(1 + 0.25 * strength));
+        if (elapsed >= 900) finish();
+        else frame = requestAnimationFrame(draw);
+      };
+      draw(start);
+    });
+  }
   async function tidy(strip) {
     if (busy || strip !== activeStrip() || tabsIn(strip).length < 5) return;
     const s = getState(strip);
+    const snapshot = tabsIn(strip);
     busy = true;
     if (!mountControl(strip, s)) { busy = false; return; }
     s.separator.classList.add('ztt-working');
@@ -142,16 +190,16 @@
     s.tidyButton.setAttribute('aria-busy', 'true');
     try {
       // Let the wave play while retaining an exact scope for this click.
-      await new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 650));
+      await animateTidy(s);
       if (destroyed || !strip.isConnected || strip !== activeStrip()) return;
-      const tabs = tabsIn(strip);
+      const tabs = snapshot.filter(tab => eligible(tab, strip));
       const { groups, loose } = groupTabs(tabs,
         tab => ({ url: tab.linkedBrowser?.currentURI?.spec, title: tab.label }),
         host => Services.eTLD.getBaseDomainFromHost(host));
       s.assignments.clear();
       for (const [name, items] of groups) for (const tab of items) s.assignments.set(tab, name);
       removeHeaders(s);
-      moveInOrder(strip, [...groups.values()].flat().concat(loose));
+      moveInOrder(strip, loose.concat([...groups.values()].flat()));
     } finally {
       busy = false;
       s.separator?.classList.remove('ztt-working');
@@ -160,6 +208,7 @@
     }
   }
   function unmountControl(s) {
+    s.cancelWave?.();
     s.tidyButton?.remove();
     s.separator?.classList.remove('ztt-native-separator', 'ztt-working');
     s.tidyButton = null; s.separator = null;
@@ -192,7 +241,17 @@
     const s = getState(strip);
     mountControl(strip, s);
     for (const tab of s.assignments.keys()) if (!eligible(tab, strip)) s.assignments.delete(tab);
+    // A group is a snapshot from the last Tidy click. New tabs stay above
+    // all headers, even when Zen inserts them next to the selected tab.
+    const counts = new Map();
+    for (const name of s.assignments.values()) counts.set(name, (counts.get(name) || 0) + 1);
+    for (const [tab, name] of s.assignments) if (counts.get(name) < 2) s.assignments.delete(tab);
+    const current = tabsIn(strip);
+    const loose = current.filter(tab => !s.assignments.has(tab));
+    const grouped = current.filter(tab => s.assignments.has(tab));
+    const ordered = [...loose, ...grouped];
     removeHeaders(s);
+    if (current.some((tab, i) => tab !== ordered[i])) moveInOrder(strip, ordered);
     let lastName;
     for (const tab of tabsIn(strip)) {
       const name = s.assignments.get(tab);
@@ -228,6 +287,8 @@
       color:inherit; font:inherit; font-size:11px; font-weight:600; padding:5px 6px;
       min-width:22px; min-height:20px; cursor:pointer; white-space:nowrap; }
     .ztt-icon { display:block; width:14px; height:14px; background:currentColor; mask-size:contain; mask-repeat:no-repeat; mask-position:center; }
+    .ztt-header .ztt-close .ztt-icon { width:9px; height:9px; margin:auto; }
+    .ztt-header .ztt-close { width:20px; min-width:20px; padding:2px!important; display:grid; place-items:center; }
     .ztt-button:hover { background:transparent; box-shadow:none; }
     .ztt-button:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); outline-offset:1px; }
     .ztt-button[hidden] { display:none; }
@@ -261,18 +322,18 @@
       background:transparent!important;
     }
     .ztt-native-separator.ztt-working > toolbarseparator {
-      position:relative; overflow:hidden; border-color:transparent!important;
-      min-height:14px; background:none!important; }
-    .ztt-native-separator.ztt-working > toolbarseparator::after {
-      content:''; position:absolute; top:calc(50% - 7px); left:0; right:-24px; height:14px;
-      background:currentColor; opacity:.3;
-      mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='14' viewBox='0 0 24 14'%3E%3Cpath d='M0 7Q6 0 12 7T24 7' fill='none' stroke='black' stroke-width='1.7'/%3E%3C/svg%3E") repeat-x center;
-      animation:ztt-wave .55s linear infinite; }
-    @keyframes ztt-wave { to { transform:translateX(-24px); } }
+      position:relative; overflow:visible; border-color:transparent!important;
+      background:none!important; }
+    .ztt-native-separator.ztt-working::before { display:none!important; }
+    .ztt-wave { position:absolute; left:0; top:50%; transform:translateY(-50%);
+      display:block; width:100%; height:9px; overflow:hidden; pointer-events:none;
+      color:var(--zen-pinned-separator-color); }
+    .ztt-native-separator.ztt-working > toolbarbutton { pointer-events:auto; }
+    .ztt-native-separator.ztt-working > toolbarbutton > :is(.toolbarbutton-icon,.toolbarbutton-text) { opacity:.5; }
     @keyframes ztt-appear { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
     :root:not([zen-sidebar-expanded='true']) .ztt-header,
     :root:not([zen-sidebar-expanded='true']) .ztt-tidy { display:none; }
-    @media(prefers-reduced-motion:reduce) { .ztt-header,.ztt-native-separator > toolbarseparator::after { animation:none!important; } }
+    @media(prefers-reduced-motion:reduce) { .ztt-header,.ztt-wave { animation:none!important; } }
   `;
   function init() {
     if (destroyed) return;
