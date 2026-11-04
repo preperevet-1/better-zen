@@ -67,12 +67,8 @@ assert.throws(()=>parseAIPlan({groups:[{name:'',tabIds:[0,1]}]},aiTabs));
 assert.throws(()=>parseAIPlan({groups:[{name:'A',tabIds:[0,1]},{name:'B',tabIds:[1,2]}]},aiTabs));
 assert.deepEqual(parseAIPlan({groups:[]},aiTabs).loose,aiTabs);
 console.log('12 additional AI validation assertions passed');
-const { apiError } = require('./tidy-tabs.uc.js');
-assert.match(apiError(429,{error:{code:'insufficient_quota'}}),/billing/);
-assert.match(apiError(429,{error:{code:'credit_balance_exhausted'}}),/credits/);
-assert.match(apiError(429,{error:{code:'project_spend_limit_exceeded'}}),/spending/);
-assert.match(apiError(429,{error:{code:'rate_limit_exceeded'}},'12'),/12 seconds/);
-assert.match(apiError(429,null),/without a recognized reason/);
-assert.match(apiError(401,{error:{code:'invalid_api_key'}}),/key rejected/);
-assert.doesNotMatch(apiError(429,{error:{code:'sk-sensitive',message:'sk-sensitive'}}),/sk-sensitive/);
-console.log('7 API error diagnostics assertions passed');
+
+const { reconcileTopics } = require('./tidy-tabs.uc.js');
+const subjects = ['claude.ai','chatgpt.com','uxcel.com','figma.com','poki.com','minecraft.net'].map(host=>({url:'https://'+host}));
+const corrected = reconcileTopics({groups:new Map([['Other',subjects]])},subjects,t=>t);
+for (const [i,topic] of ['AI','Design','Gaming'].entries()) assert.deepEqual(corrected.groups.get(topic),subjects.slice(i*2,i*2+2));

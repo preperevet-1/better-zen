@@ -1,8 +1,8 @@
 {
   "id": "zen-tidy-tabs",
   "name": "Tidy Tabs",
-  "description": "On-device Apple Intelligence grouping, native Zen folders and optional OpenAI or rules.",
-  "version": "0.7.1",
+  "description": "Group tabs with on-device Apple Intelligence or local rules, drag to organize, and restore groups with your Zen session.",
+  "version": "0.8.0",
   "author": "Artem",
   "style": "chrome.css",
   "readme": "README.md",
