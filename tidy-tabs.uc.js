@@ -2,11 +2,11 @@
 // @name           Zen Tidy Tabs
 // @description    Local rule-based temporary tab groups with native Zen folders.
 // @include        main
-// @version        0.4.0
+// @version        0.5.0
 // ==/UserScript==
 (() => {
   'use strict';
-  const ICONS = {"broom": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgY2xhc3M9Imx1Y2lkZSBsdWNpZGUtYnJvb20tc3BhcmtsZXMgcHJldmlldy1pY29uIj48cGF0aCBkPSJNMTEgMnYyIi8+PHBhdGggZD0iTTEyIDNoLTIiLz48cGF0aCBkPSJNMTMuNSAxMC41IDIyIDIiLz48cGF0aCBkPSJNMTQuNzM0IDEzLjg0MWEyIDIgMCAwMC0uMzE0LTIuNDJMMTIuNTggOS41OGEyIDIgMCAwMC0yLjQyMS0uMzE0bC03LjY1NyA0LjQ2MUExIDEgMCAwMDIuMyAxNS4zbDYuNDAzIDYuNDAzYTEgMSAwIDAwMS41NzEtLjIwNHoiLz48cGF0aCBkPSJNMjAgMTV2NCIvPjxwYXRoIGQ9Ik0yMiAxN2gtNCIvPjxwYXRoIGQ9Ik00IDR2NCIvPjxwYXRoIGQ9Im01IDE4IDItMiIvPjxwYXRoIGQ9Ik02IDZIMiIvPjxwYXRoIGQ9Im03LjY5OSAxMC43IDUuNjAyIDUuNjAxIi8+PC9zdmc+", "close": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNS40OTE5IDE1LjUwMDgiPjxwYXRoIGQ9Ik0xNC4wMDE0IDAuMjcwNTI1TDAuMjU3NzQgMTQuMDEyMUMtMC4wNjk2NjQgMTQuMzM5NS0wLjA4MDAxNDggMTQuOTExMyAwLjI1Nzc0IDE1LjI0OTFDMC42MDM3MzQgMTUuNTg0NyAxLjE2NTE4IDE1LjU4NDcgMS41MDI5NCAxNS4yNDkxTDE1LjIzNjMgMS41MTU3MkMxNS41NzE5IDEuMTc3OTcgMTUuNTgyMyAwLjYwNjE2OSAxNS4yMzYzIDAuMjcwNTI1QzE0Ljg4ODItMC4wNTY4Nzg5IDE0LjMzNzEtMC4wNjcyMjk3IDE0LjAwMTQgMC4yNzA1MjVaTTE1LjIzNjMgMTQuMDEyMUwxLjUwMjk0IDAuMjcwNTI1QzEuMTY1MTgtMC4wNTY4Nzg5IDAuNTkzMzg0LTAuMDY3MjI5NyAwLjI1Nzc0IDAuMjcwNTI1Qy0wLjA2OTY2NCAwLjYxNjUxOS0wLjA2OTY2NCAxLjE3Nzk3IDAuMjU3NzQgMS41MTU3MkwxNC4wMDE0IDE1LjI0OTFDMTQuMzI2NyAxNS41ODQ3IDE0Ljg5ODUgMTUuNTg0NyAxNS4yMzYzIDE1LjI0OTFDMTUuNTcxOSAxNC45MDEgMTUuNTcxOSAxNC4zMzk1IDE1LjIzNjMgMTQuMDEyMVoiLz48L3N2Zz4=", "folder": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTMgN2g2bDIgMmgxMHYxMUgzek0zIDdWNGg2bDIgM00xNiAxMXY2TTEzIDE0aDYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMS43IiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48L3N2Zz4="};
+  const ICONS = {"broom": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNCAxNCI+PGcgdHJhbnNmb3JtPSJyb3RhdGUoMjUgNyA3KSI+PHBhdGggZD0iTTcgLjc1VjciIGZpbGw9Im5vbmUiIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48cmVjdCB4PSI0LjUiIHk9IjYuNSIgd2lkdGg9IjUiIGhlaWdodD0iMiIgcng9Ii43NSIvPjxwYXRoIGQ9Ik00LjI1IDlIOS43NUwxMS41IDEzLjVIMi41WiIvPjwvZz48L3N2Zz4=", "close": "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPCEtLUdlbmVyYXRvcjogQXBwbGUgTmF0aXZlIENvcmVTVkcgMzYyLS0+CjwhRE9DVFlQRSBzdmcKUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIKICAgICAgICJodHRwOi8vd3d3LnczLm9yZy9HcmFwaGljcy9TVkcvMS4xL0RURC9zdmcxMS5kdGQiPgo8c3ZnIHZlcnNpb249IjEuMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgdmlld0JveD0iMCAwIDE5Ljc2MzkgMTkuNzgzMSI+CiA8Zz4KICA8cmVjdCBoZWlnaHQ9IjE5Ljc4MzEiIG9wYWNpdHk9IjAiIHdpZHRoPSIxOS43NjM5IiB4PSIwIiB5PSIwIi8+CiAgPHBhdGggZD0iTTE4LjEzODcgMC4zMDcwNjdMMC4yODM4OTEgMTguMTU2NEMtMC4wNzY5Mzg5IDE4LjUxNzItMC4wODc0OTE2IDE5LjEzNzMgMC4yODM4OTEgMTkuNTA4N0MwLjY2MDI5NSAxOS44NzQ2IDEuMjY5ODggMTkuODc0NiAxLjY0MTI2IDE5LjUwODdMMTkuNDg1NSAxLjY2NDQ0QzE5Ljg1MTQgMS4yOTMwNSAxOS44NjE5IDAuNjcyOTE4IDE5LjQ4NTUgMC4zMDcwNjdDMTkuMTAzNi0wLjA1Mzc2MzYgMTguNTA0Ni0wLjA2NDMxNjIgMTguMTM4NyAwLjMwNzA2N1pNMTkuNDg1NSAxOC4xNTY0TDEuNjQxMjYgMC4zMDcwNjdDMS4yNjk4OC0wLjA1Mzc2MzYgMC42NDk3NDMtMC4wNjQzMTYyIDAuMjgzODkxIDAuMzA3MDY3Qy0wLjA3NjkzODkgMC42ODM0NzEtMC4wNzY5Mzg5IDEuMjkzMDUgMC4yODM4OTEgMS42NjQ0NEwxOC4xMzg3IDE5LjUwODdDMTguNDk0IDE5Ljg3NDYgMTkuMTE0MiAxOS44NzQ2IDE5LjQ4NTUgMTkuNTA4N0MxOS44NTE0IDE5LjEyNjggMTkuODUxNCAxOC41MTcyIDE5LjQ4NTUgMTguMTU2NFoiIGZpbGw9ImJsYWNrIiBmaWxsLW9wYWNpdHk9IjAuODUiLz4KIDwvZz4KPC9zdmc+Cg==", "folder": "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPCEtLUdlbmVyYXRvcjogQXBwbGUgTmF0aXZlIENvcmVTVkcgMzYyLS0+CjwhRE9DVFlQRSBzdmcKUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIKICAgICAgICJodHRwOi8vd3d3LnczLm9yZy9HcmFwaGljcy9TVkcvMS4xL0RURC9zdmcxMS5kdGQiPgo8c3ZnIHZlcnNpb249IjEuMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgdmlld0JveD0iMCAwIDQyLjIwMjUgMjYuOTY0NCI+CiA8Zz4KICA8cmVjdCBoZWlnaHQ9IjI2Ljk2NDQiIG9wYWNpdHk9IjAiIHdpZHRoPSI0Mi4yMDI1IiB4PSIwIiB5PSIwIi8+CiAgPHBhdGggZD0iTTE2LjUxODUgMi45NDc4TDE3LjI2MTkgMy41ODAxQzE3LjkwNjMgNC4xMzk1NSAxOC40MDk5IDQuMzMxNTMgMTkuMzMwOCA0LjMzMTUzTDI3LjMxNDkgNC4zMzE1M0MyNy4wMzAxIDQuODcyMTggMjYuODEzNiA1LjQ1MjE5IDI2LjY3NjEgNi4wNjEzMUwxOC45MDIxIDYuMDYxMzFDMTcuNjQxIDYuMDYxMzEgMTYuOTk0MSA1LjgyNjA5IDE2LjIwMTUgNS4xMzk1TDE1LjQ1MjYgNC41MDcyQzE0Ljc5MTcgMy45MzExNiAxNC4yOTkxIDMuNzMzNjQgMTMuNDA1OSAzLjczMzY0TDEwLjU5MiAzLjczMzY0QzkuMzE3ODQgMy43MzM2NCA4LjY0NjgzIDQuMzgzNTUgOC42NDY4MyA1LjY4NDM5TDguNjQ2ODMgMjAuOTYwOEM4LjY0NjgzIDIyLjM2NTcgOS4zODkyNCAyMy4wNzY0IDEwLjc1MTkgMjMuMDc2NEwzMS40NTA2IDIzLjA3NjRDMzIuNzkxMiAyMy4wNzY0IDMzLjU1NTcgMjIuMzY1NyAzMy41NTU3IDIwLjk3MTNMMzMuNTU1NyAxNS43MDMyQzMzLjgxMDcgMTUuNzI5OCAzNC4wNjk1IDE1Ljc0MjggMzQuMzMxMSAxNS43NDI4QzM0LjY1NDMgMTUuNzQyOCAzNC45NzM0IDE1LjcyMjUgMzUuMjg1NSAxNS42NzY3TDM1LjI4NTUgMjEuMDQ1N0MzNS4yODU1IDIzLjUzMjEgMzQuMDExOSAyNC44MTY4IDMxLjc4ODggMjQuODE2OEwxMC43MTk4IDI0LjgxNjhDOC4yMDEyMiAyNC44MTY4IDYuOTE3MDUgMjMuNTQzMSA2LjkxNzA1IDIxLjA0NTdMNi45MTcwNSA1LjU4Mjg3QzYuOTE3MDUgMy4xOTU1MyA4LjExMzIzIDIuMDE0OTMgMTAuMjQyOCAyLjAxNDkzTDEzLjgzNDUgMi4wMTQ5M0MxNS4wODQ2IDIuMDE0OTMgMTUuNjg3NyAyLjIyMyAxNi41MTg1IDIuOTQ3OFpNMjYuNDU1NCA3Ljg0OTAyTDI2LjQ1NDIgNy44NzEzOEMyNi40NTQyIDguNTEyODggMjYuNTMyMyA5LjEzNzExIDI2LjY4NzggOS43MzE3OUwxMC4wNDE1IDkuNzMxNzlMMTAuMDQxNSA5LjEwODE2QzEwLjA0MTUgOC4yOTE4OCAxMC40ODgzIDcuODQ5MDIgMTEuNDA1MiA3Ljg0OTAyWiIgZmlsbD0iYmxhY2siIGZpbGwtb3BhY2l0eT0iMC44NSIvPgogIDxwYXRoIGQ9Ik00MC42NDE1IDcuODcxMzhDNDAuNjQxNSAxMS4zMjY5IDM3Ljc1NDUgMTQuMTgxOCAzNC4zMzExIDE0LjE4MThDMzAuODcwNiAxNC4xODE4IDI4LjAwNDcgMTEuMzQ4IDI4LjAwNDcgNy44NzEzOEMyOC4wMDQ3IDQuNDEwODYgMzAuODcwNiAxLjU2MTAxIDM0LjMzMTEgMS41NjEwMUMzNy43OTE3IDEuNTYxMDEgNDAuNjQxNSA0LjQwNTMyIDQwLjY0MTUgNy44NzEzOFpNMzMuNjE2NSA0LjU5ODc2TDMzLjYxNjUgNy4xNTY3MUwzMS4wNDc1IDcuMTU2NzFDMzAuNjM3NCA3LjE1NjcxIDMwLjMzODMgNy40MzkxNiAzMC4zMzgzIDcuODcxMzhDMzAuMzM4MyA4LjMwMzYxIDMwLjYzNzQgOC41ODA1MyAzMS4wNDc1IDguNTgwNTNMMzMuNjE2NSA4LjU4MDUzTDMzLjYxNjUgMTEuMTQ5NUMzMy42MTY1IDExLjU3MDcgMzMuODg4NCAxMS44NjQyIDM0LjMzMTEgMTEuODY0MkMzNC43NTc4IDExLjg2NDIgMzUuMDQwMyAxMS41NzA3IDM1LjA0MDMgMTEuMTQ5NUwzNS4wNDAzIDguNTgwNTNMMzcuNjAzOCA4LjU4MDUzQzM4LjAxOTQgOC41ODA1MyAzOC4zMDI0IDguMzAzNjEgMzguMzAyNCA3Ljg3MTM4QzM4LjMwMjQgNy40MzkxNiAzOC4wMTk0IDcuMTU2NzEgMzcuNjAzOCA3LjE1NjcxTDM1LjA0MDMgNy4xNTY3MUwzNS4wNDAzIDQuNTk4NzZDMzUuMDQwMyA0LjE4MzEzIDM0Ljc1NzggMy44ODQwOSAzNC4zMzExIDMuODg0MDlDMzMuODg4NCAzLjg4NDA5IDMzLjYxNjUgNC4xODMxMyAzMy42MTY1IDQuNTk4NzZaIiBmaWxsPSJibGFjayIgZmlsbC1vcGFjaXR5PSIwLjg1Ii8+CiA8L2c+Cjwvc3ZnPgo="};
   // First matching rule wins. Edit names/domains/words to customize.
   const RULES = [
     { name: 'Arc Browser', domains: ['arc.net', 'thebrowser.company'], words: ['arc browser', 'act ii of arc'] },
@@ -97,7 +97,7 @@
   }
   const tabsIn = strip => [...strip.children].filter(t => eligible(t, strip));
   function getState(strip) {
-    if (!states.has(strip)) states.set(strip, { assignments: new Map(), headers: [], separator: null, tidyButton: null });
+    if (!states.has(strip)) states.set(strip, { assignments: new Map(), revealed: new Set(), headers: [], separator: null, tidyButton: null });
     return states.get(strip);
   }
   function members(strip, name) {
@@ -197,6 +197,7 @@
         tab => ({ url: tab.linkedBrowser?.currentURI?.spec, title: tab.label }),
         host => Services.eTLD.getBaseDomainFromHost(host));
       s.assignments.clear();
+      s.revealed.clear();
       for (const [name, items] of groups) for (const tab of items) s.assignments.set(tab, name);
       removeHeaders(s);
       moveInOrder(strip, loose.concat([...groups.values()].flat()));
@@ -250,22 +251,40 @@
     const loose = current.filter(tab => !s.assignments.has(tab));
     const grouped = current.filter(tab => s.assignments.has(tab));
     const ordered = [...loose, ...grouped];
-    removeHeaders(s);
     if (current.some((tab, i) => tab !== ordered[i])) moveInOrder(strip, ordered);
     let lastName;
+    const previous = [...s.headers];
+    const kept = [];
+    let revealIndex = 0;
     for (const tab of tabsIn(strip)) {
       const name = s.assignments.get(tab);
       if (name && name !== lastName && members(strip, name).length >= 2) {
-        const header = node('div', 'ztt-header');
-        const label = node('span', 'ztt-label', name);
-        header.append(label,
-          button('⊞', 'Create pinned folder: ' + name, () => folder(strip, name)),
-          button('×', 'Close group: ' + name, () => clear(strip, name)));
-        strip.insertBefore(header, tab); s.headers.push(header);
+        let header = previous.find(h => h.dataset.zttGroup === name && !kept.includes(h));
+        if (!header) {
+          header = node('div', 'ztt-header');
+          header.dataset.zttGroup = name;
+          const label = node('span', 'ztt-label', name);
+          header.append(label,
+            button('⊞', 'Create pinned folder: ' + name, () => folder(strip, name)),
+            button('×', 'Close group: ' + name, () => clear(strip, name)));
+          if (!s.revealed.has(name)) {
+            s.revealed.add(name);
+            label.classList.add('ztt-title-enter');
+            label.style.animationDelay = Math.min(revealIndex++ * 55, 165) + 'ms';
+            label.addEventListener('animationend', () => {
+              label.classList.remove('ztt-title-enter'); label.style.removeProperty('animation-delay');
+            }, { once:true });
+          }
+        }
+        if (header.nextElementSibling !== tab) strip.insertBefore(header, tab);
+        kept.push(header);
       }
       lastName = name;
     }
+    for (const header of previous) if (!kept.includes(header)) header.remove();
+    s.headers = kept;
   }
+
   function schedule() {
     clearTimeout(timer);
     timer = setTimeout(() => {
@@ -281,12 +300,13 @@
     .ztt-header { display:flex; align-items:center; gap:5px; flex:none;
       box-sizing:border-box; min-width:0; margin:3px 5px 0; padding:0 5px;
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
-    .ztt-header { height:22px; min-height:22px; margin-top:3px; animation:ztt-appear .22s ease-out; }
+    .ztt-header { height:22px; min-height:22px; margin-top:3px; }
     .ztt-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
     .ztt-button { appearance:none; border:0; border-radius:6px; background:transparent;
       color:inherit; font:inherit; font-size:11px; font-weight:600; padding:5px 6px;
       min-width:22px; min-height:20px; cursor:pointer; white-space:nowrap; }
     .ztt-icon { display:block; width:14px; height:14px; background:currentColor; mask-size:contain; mask-repeat:no-repeat; mask-position:center; }
+    .ztt-header .ztt-button:not(.ztt-close) .ztt-icon { width:19px; height:15px; }
     .ztt-header .ztt-close .ztt-icon { width:9px; height:9px; margin:auto; }
     .ztt-header .ztt-close { width:20px; min-width:20px; padding:2px!important; display:grid; place-items:center; }
     .ztt-button:hover { background:transparent; box-shadow:none; }
@@ -330,10 +350,14 @@
       color:var(--zen-pinned-separator-color); }
     .ztt-native-separator.ztt-working > toolbarbutton { pointer-events:auto; }
     .ztt-native-separator.ztt-working > toolbarbutton > :is(.toolbarbutton-icon,.toolbarbutton-text) { opacity:.5; }
-    @keyframes ztt-appear { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+    .ztt-title-enter { animation:ztt-title-enter 420ms cubic-bezier(.2,.7,.2,1) both; }
+    @keyframes ztt-title-enter {
+      from { opacity:0; transform:translateY(4px); filter:blur(2px); }
+      to { opacity:.68; transform:translateY(0); filter:blur(0); }
+    }
     :root:not([zen-sidebar-expanded='true']) .ztt-header,
     :root:not([zen-sidebar-expanded='true']) .ztt-tidy { display:none; }
-    @media(prefers-reduced-motion:reduce) { .ztt-header,.ztt-wave { animation:none!important; } }
+    @media(prefers-reduced-motion:reduce) { .ztt-title-enter,.ztt-wave { animation:none!important; } }
   `;
   function init() {
     if (destroyed) return;
