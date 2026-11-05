@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.9.3
+// @version        0.9.5
 // ==/UserScript==
 (() => {
   'use strict';
@@ -241,12 +241,6 @@
       const bounds = strip.getBoundingClientRect();
       const insideX = event.clientX >= bounds.left && event.clientX <= bounds.right;
       const inColumn = insideX && y >= bounds.top && y <= bounds.bottom;
-      const rows = [...strip.children].filter(el => eligible(el,strip) || el.classList.contains('ztt-header'));
-      // A native drag preview can sit under the pointer instead of the destination tab.
-      const hit = inColumn ? rows.find(el => {
-        const rect = el.getBoundingClientRect();
-        return rect.height > 0 && y >= rect.top && y < rect.bottom;
-      }) : null;
       if (name) {
         const separator = s.separator;
         const section = separator?.parentElement;
@@ -266,7 +260,30 @@
           }
           return {kind:'folder',element:separator,edge:'before',insertBefore:separator};
         }
+        if (!strip.contains(target) && !inColumn) return null;
+        // The header and its last member delimit one drop target. Only one
+        // midpoint per group participates, regardless of the hovered child.
+        let lastSlot = null;
+        for (const header of s.headers) {
+          const topic = header.dataset.zttGroup;
+          if (topic === name) continue;
+          const last = members(strip,topic).at(-1);
+          if (!last) continue;
+          const top = header.getBoundingClientRect().top;
+          const bottom = last.getBoundingClientRect().bottom;
+          if (y < (top + bottom) / 2)
+            return {kind:'order',topic,edge:'before',element:header};
+          lastSlot = {kind:'order',topic,edge:'after',element:last};
+          if (y <= bottom) return lastSlot;
+        }
+        return lastSlot;
       }
+      const rows = [...strip.children].filter(el => eligible(el,strip) || el.classList.contains('ztt-header'));
+      // A native drag preview can sit under the pointer instead of the destination tab.
+      const hit = inColumn ? rows.find(el => {
+        const rect = el.getBoundingClientRect();
+        return rect.height > 0 && y >= rect.top && y < rect.bottom;
+      }) : null;
       const first = tabsIn(strip).find(t => t !== tab);
       if (tab && s.assignments.has(tab) && (s.separator?.contains(target) ||
           insideX && s.separator && s.headers[0] && y >= s.separator.getBoundingClientRect().top &&
@@ -299,13 +316,7 @@
           return {kind:'tab',topic:s.assignments.get(next),anchor:next,element:next,edge:'before'};
         return null;
       }
-      if (topic === name) return null;
-      const anchor = header || row;
-      const after = anchor ? event.clientY > anchor.getBoundingClientRect().top + anchor.getBoundingClientRect().height / 2 : true;
-      const edge = topic ? (after ? 'after' : 'before') : (anchor ? 'before' : 'after');
-      const targetMembers = topic ? members(strip,topic) : [];
-      const firstHeader = s.headers.find(h => h.dataset.zttGroup === topic);
-      return {kind:'order',topic, edge, element:topic ? (after ? targetMembers.at(-1) : firstHeader) : anchor || strip};
+      return null;
     }
     function handle(event) {
       const dest = destination(event);
@@ -588,11 +599,25 @@
       color:var(--ztt-address-ink)!important; opacity:1; }
     :root[zen-single-toolbar="true"] .zen-essentials-container:not(:empty) {
       padding-bottom:4px!important; }
-    #zen-sidebar-foot-buttons toolbarbutton:not([zen-workspace-id]) {
-      border-radius:11px!important; }
-    #zen-sidebar-foot-buttons toolbarbutton:not([zen-workspace-id]) .toolbarbutton-icon {
-      scale:.85; background:transparent!important; }
-    #zen-sidebar-foot-buttons toolbarbutton:not([zen-workspace-id]):is(:hover,:focus-visible),
+    /* Native navigation: 31×29 hit area, 29×29 hover surface, 17×17 artwork. */
+    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button) {
+      box-sizing:border-box!important; position:relative; flex:none!important;
+      width:31px!important; min-width:31px!important; max-width:31px!important;
+      height:29px!important; min-height:29px!important; max-height:29px!important;
+      padding:0 1px!important; align-items:center; justify-content:center;
+      background:transparent!important; }
+    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button)::before {
+      content:''; position:absolute; inset:0 1px; pointer-events:none; }
+    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button):is(:hover,:focus-visible)::before {
+      background:var(--toolbarbutton-hover-background,var(--zen-toolbar-element-bg)); }
+    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button)::before,
+    :is(#back-button,#forward-button,#reload-button,#stop-button) > .toolbarbutton-icon {
+      border-radius:11px!important; corner-shape:squircle; }
+    #zen-sidebar-foot-buttons #zen-create-new-button > .toolbarbutton-icon {
+      box-sizing:border-box!important; width:29px!important; height:29px!important;
+      padding:6px!important; scale:none!important; background:transparent!important; position:relative; }
+    #zen-sidebar-foot-buttons #zen-library-button .zen-library-sprite {
+      --zen-library-sprite-size:17px; width:17px!important; height:17px!important; scale:none!important; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover {
       border-radius:11px!important; background:color-mix(in srgb,currentColor 9%,transparent)!important; }
     #zen-workspaces-button, #zen-workspaces-button[dont-show='true'] {
