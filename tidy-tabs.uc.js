@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.9.6
+// @version        0.9.8
 // ==/UserScript==
 (() => {
   'use strict';
@@ -593,6 +593,7 @@
     :root[zen-has-empty-tab="true"] #urlbar #identity-icon {
       list-style-image:url("chrome://browser/skin/zen-icons/search-glass.svg")!important;
       -moz-context-properties:fill; fill:currentColor; opacity:.65; }
+    #urlbar:not([breakout-extend]) #urlbar-input { text-indent:2px!important; }
     #urlbar { --ztt-address-ink:light-dark(#929292,#aaa); }
     #urlbar:is(:hover,:focus-within) { --ztt-address-ink:light-dark(#111,#f4f4f4); }
     #urlbar #urlbar-input, #urlbar #urlbar-input::placeholder {
@@ -617,9 +618,9 @@
       box-sizing:border-box!important; width:29px!important; height:29px!important;
       padding:6px!important; scale:none!important; background:transparent!important; position:relative; }
     #zen-sidebar-foot-buttons #zen-library-button .zen-library-sprite {
-      --zen-library-sprite-size:17px; width:17px!important; height:17px!important; scale:none!important; }
+      --zen-library-sprite-size:17px; width:17px!important; height:17px!important; scale:1.03!important; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover {
-      border-radius:11px!important; background:color-mix(in srgb,currentColor 9%,transparent)!important; }
+      background:transparent!important; border-color:transparent!important; box-shadow:none!important; }
     #zen-workspaces-button, #zen-workspaces-button[dont-show='true'] {
       display:flex!important; justify-content:safe center!important; gap:0!important; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id] {
@@ -633,6 +634,13 @@
       width:6px!important; height:6px!important; border-radius:50%!important;
       background:currentColor!important; opacity:.25!important; pointer-events:none; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id][active='true']::after { opacity:.95!important; }
+    #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover::after {
+      background:color-mix(in srgb,currentColor 85%,black)!important; }
+    #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover:not([active='true'])::after { opacity:.38!important; }
+    #zen-workspaces-button toolbarbutton[zen-workspace-id][active='true']:hover::after { opacity:1!important; }
+    @media (prefers-color-scheme:dark) {
+      #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover:not([active='true'])::after { opacity:.25!important; }
+    }
 
     .ztt-header { display:flex; align-items:center; gap:5px; flex:none;
       box-sizing:border-box; min-width:0; margin:3px 5px 0; padding:0 5px;
