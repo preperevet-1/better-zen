@@ -1,8 +1,8 @@
 {
   "id": "zen-tidy-tabs",
   "name": "Tidy Tabs",
-  "description": "Group tabs with on-device Apple Intelligence or local rules, drag to organize, and restore groups with your Zen session.",
-  "version": "0.8.0",
+  "description": "Organize Zen tabs by topic using local rules.",
+  "version": "0.9.0",
   "author": "Artem",
   "style": "chrome.css",
   "readme": "README.md",

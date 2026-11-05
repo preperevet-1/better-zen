@@ -1,18 +1,18 @@
 const assert = require('node:assert/strict');
 const { classify, groupTabs, eligible } = require('./tidy-tabs.uc.js');
 const cases = [
- ['https://store.steampowered.com', 'Welcome to Steam', 'Games'],
- ['https://google.com/search?q=videogames', '', 'Games'],
+ ['https://store.steampowered.com', 'Welcome to Steam', 'Gaming'],
+ ['https://google.com/search?q=videogames', '', 'Gaming'],
  ['https://youtube.com', 'YouTube', 'Media'],
  ['https://google.com/search?q=search+design', '', 'Design'],
  ['https://example.com', 'Що таке UX: принципи', 'Design'],
  ['https://example.com', 'Design Resources', 'Design'],
- ['https://wikipedia.org', 'Wikipedia', 'wikipedia.org'],
+ ['https://wikipedia.org', 'Wikipedia', 'Reference'],
  ['https://pinterest.com', '', 'Design'],
  ['https://youtube.com/watch?v=a', 'Meet Act II of Arc Browser', 'Arc Browser'],
  ['https://example.com', 'Watch together using SharePlay', 'Apple'],
- ['https://notapple.com', '', 'notapple.com'],
- ['https://example.com', 'Liquid guide', 'example.com'],
+ ['https://notapple.com', '', 'Other'],
+ ['https://example.com', 'Liquid guide', 'Other'],
  ['about:blank', '', 'Other'],
  ['bad url', '', 'Other']
 ];
@@ -25,7 +25,7 @@ assert.equal(eligible(tab,{}),false);
 for (const attr of ['pinned','zen-essential','zen-empty-tab','zen-glance-tab']) assert.equal(eligible({...tab,hasAttribute:a=>a===attr},strip),false);
 
 
-assert.equal(classify({url:'https://minecraft.net',title:'Добро пожаловать на официальный сайт'}),'Games');
+assert.equal(classify({url:'https://minecraft.net',title:'Добро пожаловать на официальный сайт'}),'Gaming');
 assert.equal(classify({url:'https://uk.wikipedia.org',title:'Інтерфейс користувача'}),'Design');
 assert.equal(classify({url:'https://ru.wikipedia.org',title:'Интерфейс пользователя'}),'Design');
 const sample = [
@@ -34,7 +34,7 @@ const sample = [
  {url:'https://youtube.com'}, {url:'https://chatgpt.com'}, {url:'https://accounts.google.com'}
 ];
 const plan = groupTabs(sample, t=>t);
-assert.equal(plan.groups.get('Games').length,2);
+assert.equal(plan.groups.get('Gaming').length,2);
 assert.equal(plan.groups.get('Design').length,2);
 assert.equal(plan.groups.get('Other').length,3);
 assert.equal(plan.groups.size,3);
@@ -51,24 +51,6 @@ assert.equal(new Set(seen).size,sample.length);
 assert.equal(seen.length,sample.length);
 assert.deepEqual(plan.groups.get('Other'),sample.slice(4));
 console.log('39 assertions passed');
-const { aiURL, parseAIPlan } = require('./tidy-tabs.uc.js');
-assert.equal(aiURL('https://user:password@example.com/page?token=secret#private'),'https://example.com/page');
-assert.equal(aiURL('about:preferences'),'');
-assert.equal(aiURL('file:///secret.txt'),'');
-assert.equal(aiURL('bad url'),'');
-const aiTabs=[{id:0},{id:1},{id:2}];
-const aiResult=parseAIPlan({groups:[{name:'Space',tabIds:[0,2]}]},aiTabs);
-assert.deepEqual(aiResult.groups.get('Space'),[aiTabs[0],aiTabs[2]]);
-assert.deepEqual(aiResult.loose,[aiTabs[1]]);
-assert.throws(()=>parseAIPlan({groups:[{name:'Bad',tabIds:[0,99]}]},aiTabs));
-assert.throws(()=>parseAIPlan({groups:[{name:'Bad',tabIds:[0,0]}]},aiTabs));
-assert.throws(()=>parseAIPlan({groups:[{name:'Bad',tabIds:[0]}]},aiTabs));
-assert.throws(()=>parseAIPlan({groups:[{name:'',tabIds:[0,1]}]},aiTabs));
-assert.throws(()=>parseAIPlan({groups:[{name:'A',tabIds:[0,1]},{name:'B',tabIds:[1,2]}]},aiTabs));
-assert.deepEqual(parseAIPlan({groups:[]},aiTabs).loose,aiTabs);
-console.log('12 additional AI validation assertions passed');
-
-const { reconcileTopics } = require('./tidy-tabs.uc.js');
-const subjects = ['claude.ai','chatgpt.com','uxcel.com','figma.com','poki.com','minecraft.net'].map(host=>({url:'https://'+host}));
-const corrected = reconcileTopics({groups:new Map([['Other',subjects]])},subjects,t=>t);
-for (const [i,topic] of ['AI','Design','Gaming'].entries()) assert.deepEqual(corrected.groups.get(topic),subjects.slice(i*2,i*2+2));
+const unknown = [{url:'https://example.org/a'}, {url:'https://example.org/b'}];
+assert.deepEqual([...groupTabs(unknown,x=>x).groups.keys()],['Other']);
+assert.equal(classify({url:'https://google.com/search?q=space+x'}),'Space');
