@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.9.1
+// @version        0.9.2
 // ==/UserScript==
 (() => {
   'use strict';
@@ -560,12 +560,32 @@
   }
   const style = node('style');
   style.textContent = `
+    .zen-workspace-scroll-to-tab, .zen-current-workspace-indicator { display:none!important; }
+
+    #urlbar :is(#page-action-buttons,#zen-copy-url-button,#tracking-protection-icon-container,
+      #trust-icon-container,#urlbar-revert-button-container,#urlbar-search-mode-indicator-close),
+    #urlbar #identity-box > :not(#zen-site-data-icon-button) { display:none!important; }
+
+    #zen-workspaces-button, #zen-workspaces-button[dont-show='true'] {
+      display:flex!important; justify-content:safe center!important; gap:0!important; }
+    #zen-workspaces-button toolbarbutton[zen-workspace-id] {
+      position:relative; flex:0 0 12px!important; width:12px!important; min-width:12px!important;
+      max-width:12px!important; height:24px!important; margin:0!important; padding:0!important;
+      background:transparent!important; opacity:1!important; filter:none!important; }
+    #zen-workspaces-button toolbarbutton[zen-workspace-id] > * { visibility:hidden!important; }
+    #zen-workspaces-button toolbarbutton[zen-workspace-id]::after {
+      content:''!important; display:block!important; position:absolute!important; inset:auto!important;
+      left:50%!important; top:50%!important; transform:translate(-50%,-50%)!important;
+      width:6px!important; height:6px!important; border-radius:50%!important;
+      background:currentColor!important; opacity:.25!important; pointer-events:none; }
+    #zen-workspaces-button toolbarbutton[zen-workspace-id][active='true']::after { opacity:.95!important; }
+
     .ztt-header { display:flex; align-items:center; gap:5px; flex:none;
       box-sizing:border-box; min-width:0; margin:3px 5px 0; padding:0 5px;
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
     .ztt-header { height:22px; min-height:22px; margin-top:3px; }
     .ztt-label { flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
-    .ztt-group-close { appearance:none; margin-inline-start:auto; padding:0; border:0; background:transparent; color:inherit;
+    .ztt-group-close { margin-inline-end:-8px; appearance:none; margin-inline-start:auto; padding:0; border:0; background:transparent; color:inherit;
       width:22px; height:20px; display:grid; place-items:center; opacity:0; cursor:default; }
     .ztt-group-close::before { content:''; width:12px; height:12px; background:currentColor;
       mask:url('resource://content-accessible/close-12.svg') center / contain no-repeat; }
