@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.9.2
+// @version        0.9.3
 // ==/UserScript==
 (() => {
   'use strict';
@@ -164,12 +164,12 @@
     if (tabs.length) gBrowser.removeTabs(tabs);
     schedule();
   }
-  function folder(strip, name) {
+  function folder(strip, name, insertBefore = null) {
     if (busy || strip !== activeStrip()) return;
     const tabs = members(strip, name);
     if (!tabs.length) return;
     if (typeof gZenFolders?.createFolder !== 'function') throw new Error('This Zen version does not support native folders.');
-    const created = gZenFolders.createFolder(tabs, { label: name, workspaceId: gZenWorkspaces.activeWorkspace });
+    const created = gZenFolders.createFolder(tabs, { label: name, insertBefore, workspaceId: gZenWorkspaces.activeWorkspace });
     return Promise.resolve(created).then(() => {
       for (const tab of tabs) saveGroup(tab, null);
       schedule();
@@ -248,12 +248,23 @@
         return rect.height > 0 && y >= rect.top && y < rect.bottom;
       }) : null;
       if (name) {
-        const workspace = gZenWorkspaces.activeWorkspaceElement;
         const separator = s.separator;
-        if (workspace.contains(target) && separator &&
-            (separator.contains(target) || target.closest?.('.zen-workspace-pinned-tabs-section') ||
-             event.clientY < separator.getBoundingClientRect().top)) {
-          return {kind:'folder', element:separator, edge:'pin'};
+        const section = separator?.parentElement;
+        const rect = section?.getBoundingClientRect();
+        if (section && (section.contains(target) || (insideX && y >= rect.top && y <= rect.bottom))) {
+          // A temporary group becomes a top-level folder. Its marker and insertion
+          // anchor must describe the same gap, including beside an expanded folder.
+          const pins = [...section.children].filter(el =>
+            el.matches('zen-folder,tab-group,tab[pinned]') && el.getBoundingClientRect().height > 0);
+          for (const [i,pin] of pins.entries()) {
+            const box = pin.getBoundingClientRect();
+            const label = pin.labelContainerElement?.getBoundingClientRect();
+            if (y < box.top + (label?.height || box.height)/2)
+              return {kind:'folder',element:pin,edge:'before',insertBefore:pin};
+            if (y <= box.bottom)
+              return {kind:'folder',element:pin,edge:'after',insertBefore:pins[i+1] || separator};
+          }
+          return {kind:'folder',element:separator,edge:'before',insertBefore:separator};
         }
       }
       const first = tabsIn(strip).find(t => t !== tab);
@@ -306,7 +317,7 @@
       reset();
       const s = getState(strip);
       if (dest.kind === 'folder') {
-        Promise.resolve().then(() => folder(strip,name)).catch(report);
+        Promise.resolve().then(() => folder(strip,name,dest.insertBefore)).catch(report);
         return;
       }
       if (dest.kind === 'tab') {
@@ -566,6 +577,24 @@
       #trust-icon-container,#urlbar-revert-button-container,#urlbar-search-mode-indicator-close),
     #urlbar #identity-box > :not(#zen-site-data-icon-button) { display:none!important; }
 
+    :root[zen-has-empty-tab="true"] #urlbar #identity-box > #identity-icon-box {
+      display:flex!important; }
+    :root[zen-has-empty-tab="true"] #urlbar #identity-icon {
+      list-style-image:url("chrome://browser/skin/zen-icons/search-glass.svg")!important;
+      -moz-context-properties:fill; fill:currentColor; opacity:.65; }
+    #urlbar { --ztt-address-ink:light-dark(#929292,#aaa); }
+    #urlbar:is(:hover,:focus-within) { --ztt-address-ink:light-dark(#111,#f4f4f4); }
+    #urlbar #urlbar-input, #urlbar #urlbar-input::placeholder {
+      color:var(--ztt-address-ink)!important; opacity:1; }
+    :root[zen-single-toolbar="true"] .zen-essentials-container:not(:empty) {
+      padding-bottom:4px!important; }
+    #zen-sidebar-foot-buttons toolbarbutton:not([zen-workspace-id]) {
+      border-radius:11px!important; }
+    #zen-sidebar-foot-buttons toolbarbutton:not([zen-workspace-id]) .toolbarbutton-icon {
+      scale:.85; background:transparent!important; }
+    #zen-sidebar-foot-buttons toolbarbutton:not([zen-workspace-id]):is(:hover,:focus-visible),
+    #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover {
+      border-radius:11px!important; background:color-mix(in srgb,currentColor 9%,transparent)!important; }
     #zen-workspaces-button, #zen-workspaces-button[dont-show='true'] {
       display:flex!important; justify-content:safe center!important; gap:0!important; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id] {
@@ -576,7 +605,7 @@
     #zen-workspaces-button toolbarbutton[zen-workspace-id]::after {
       content:''!important; display:block!important; position:absolute!important; inset:auto!important;
       left:50%!important; top:50%!important; transform:translate(-50%,-50%)!important;
-      width:6px!important; height:6px!important; border-radius:50%!important;
+      width:5px!important; height:5px!important; border-radius:50%!important;
       background:currentColor!important; opacity:.25!important; pointer-events:none; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id][active='true']::after { opacity:.95!important; }
 
