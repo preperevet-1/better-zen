@@ -9,7 +9,7 @@ const cases = [
  ['https://example.com', 'Design Resources', 'Design'],
  ['https://wikipedia.org', 'Wikipedia', 'Reference'],
  ['https://pinterest.com', '', 'Design'],
- ['https://youtube.com/watch?v=a', 'Meet Act II of Arc Browser', 'Arc Browser'],
+ ['https://youtube.com/watch?v=a', 'Meet Act II of Arc Browser', 'Browsers'],
  ['https://example.com', 'Watch together using SharePlay', 'Apple'],
  ['https://notapple.com', '', 'Other'],
  ['https://example.com', 'Liquid guide', 'Other'],
@@ -54,3 +54,10 @@ console.log('39 assertions passed');
 const unknown = [{url:'https://example.org/a'}, {url:'https://example.org/b'}];
 assert.deepEqual([...groupTabs(unknown,x=>x).groups.keys()],['Other']);
 assert.equal(classify({url:'https://google.com/search?q=space+x'}),'Space');
+
+for (const [url,title,topic] of [
+ ['https://github.com/zen-browser/desktop/releases','Release Twilight build','Browsers'],
+ ['https://diabrowser.com','Dia','Browsers'], ['https://arc.net','A farewell to Arc','Browsers'],
+ ['https://instagram.com','','Social Media'], ['https://suspilne.media','','News'],
+ ['https://github.com/example/repo','','Programming']
+]) assert.equal(classify({url,title}),topic);

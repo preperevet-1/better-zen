@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.9.0
+// @version        0.9.1
 // ==/UserScript==
 (() => {
   'use strict';
@@ -10,10 +10,16 @@
   // First matching rule wins. Edit names/domains/words to customize.
   const RULES = [
     { name: 'AI', domains: ['claude.ai','claude.com','anthropic.com','chatgpt.com','perplexity.ai'], words: ['claude','chatgpt','perplexity'] },
-    { name: 'Arc Browser', domains: ['arc.net', 'thebrowser.company'], words: ['arc browser', 'act ii of arc'] },
+    { name: 'Browsers', domains: ['zen-browser.app','zen-browser.com','arc.net','diabrowser.com','thebrowser.company','firefox.com','vivaldi.com','brave.com','opera.com','chromium.org','googlechrome.com'], words: ['browser','browsers','браузер','браузери','браузеры','firefox','chromium','zen twilight','act ii of arc','farewell to arc'] },
+    { name: 'Social Media', domains: ['instagram.com','facebook.com','threads.com','threads.net','x.com','twitter.com','tiktok.com','bsky.app','reddit.com','mastodon.social','linkedin.com'], words: ['social media','social network','соцмережі','соціальні мережі'] },
+    { name: 'News', domains: ['reuters.com','apnews.com','bbc.com','bbc.co.uk','theguardian.com','nytimes.com','suspilne.media','pravda.com.ua','theverge.com'], words: ['breaking news','новини','новости','headlines'] },
+    { name: 'Learning', domains: ['coursera.org','edx.org','khanacademy.org','duolingo.com','udemy.com'], words: ['online course','language learning','вивчення мови'] },
+    { name: 'Travel', domains: ['booking.com','airbnb.com','tripadvisor.com','skyscanner.net'], words: ['travel guide','flights','подорож','авіаквитки'] },
+    { name: 'Food', domains: ['allrecipes.com','seriouseats.com','cookpad.com'], words: ['recipe','recipes','рецепт','рецепти','sourdough'] },
+    { name: 'Sports', domains: ['espn.com','uefa.com','nba.com','formula1.com'], words: ['football','basketball','футбол','баскетбол','formula 1'] },
     { name: 'Apple', domains: ['apple.com', '9to5mac.com', 'macrumors.com'], words: ['apple', 'iphone', 'macbook', 'shareplay', 'vision pro'] },
     { name: 'Design', domains: ['figma.com', 'dribbble.com', 'behance.net', 'mobbin.com','uxcel.com','thedsgnblog.com', 'pinterest.com'], words: ['design', 'дизайн', 'ux', 'ui', 'typography', 'типографіка', 'user interface', 'интерфейс пользователя', 'інтерфейс користувача'] },
-    { name: 'Development', domains: ['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org'], words: ['javascript', 'typescript', 'react', 'css', 'програмування'] },
+    { name: 'Programming', domains: ['github.com', 'gitlab.com', 'stackoverflow.com', 'developer.mozilla.org','python.org','rust-lang.org','npmjs.com','codepen.io','developer.apple.com'], words: ['javascript', 'typescript', 'react', 'css', 'програмування','programming','coding','python','rust','kotlin','программирование'] },
     { name: 'Gaming', domains: ['steampowered.com', 'steamcommunity.com', 'gog.com', 'epicgames.com', 'minecraft.net', 'minecraft.wiki','poki.com','crazygames.com','itch.io', 'roblox.com'], words: ['videogames', 'video games', 'gaming','games','ігри','игры','poki','steam', 'відеоігри', 'minecraft', 'майнкрафт', 'roblox'] },
     { name: 'Space', domains: ['nasa.gov','esa.int','spacex.com'], words: ['space','spacex','astronomy','black holes','solar system','космос','астрономія','чорні діри'] },
     { name: 'Reference', domains: ['wikipedia.org','britannica.com','dictionary.cambridge.org'], words: [] },
@@ -25,6 +31,9 @@
     try { parsed = new URL(url); } catch { return 'Other'; }
     if (!['https:', 'http:'].includes(parsed.protocol)) return 'Other';
     const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if ((host === 'github.com' && /^\/zen-browser(?:\/|$)/i.test(parsed.pathname)) ||
+        (host === 'google.com' && /^\/chrome(?:\/|$)/.test(parsed.pathname)) ||
+        ((host === 'mozilla.org' || host.endsWith('.mozilla.org')) && /^\/(?:[a-z-]+\/)?firefox(?:\/|$)/i.test(parsed.pathname))) return 'Browsers';
     let query = '';
     // Search queries are useful, arbitrary URL paths can create false matches.
     if (/^(www\.)?(google\.[a-z.]+|bing\.com|duckduckgo\.com)$/.test(host)) {
@@ -199,6 +208,7 @@
       reset();
       const strip = activeStrip();
       if (busy || !strip) return;
+      if (event.target.closest?.('.ztt-group-close')) { event.preventDefault(); return; }
       const header = event.target.closest?.('.ztt-header');
       if (header?.parentElement === strip) {
         drag = {strip, name:header.dataset.zttGroup};
@@ -211,10 +221,32 @@
       if (eligible(tab,strip)) drag = {strip, tab};
     });
     function destination(event) {
-      if (!drag || busy || drag.strip !== activeStrip()) return null;
+      if (busy) return null;
+      // Zen also starts drags directly (for example from its tab list).
+      // The native data transfer identifies the source even when dragstart was retargeted.
+      const active = activeStrip();
+      if (!drag?.name && active) {
+        const flavor = 'application/x-moz-tabbrowser-tab';
+        const native = event.dataTransfer?.types.includes(flavor) && event.dataTransfer.mozGetDataAt(flavor,0);
+        if (native) {
+          if (!eligible(native,active) || native.multiselected && gBrowser.selectedTabs.length > 1) return null;
+          drag = {strip:active,tab:native};
+        }
+      }
+      if (!drag || drag.strip !== active) return null;
       const {strip, name, tab} = drag;
       const s = getState(strip);
       const target = event.target;
+      const y = event.clientY;
+      const bounds = strip.getBoundingClientRect();
+      const insideX = event.clientX >= bounds.left && event.clientX <= bounds.right;
+      const inColumn = insideX && y >= bounds.top && y <= bounds.bottom;
+      const rows = [...strip.children].filter(el => eligible(el,strip) || el.classList.contains('ztt-header'));
+      // A native drag preview can sit under the pointer instead of the destination tab.
+      const hit = inColumn ? rows.find(el => {
+        const rect = el.getBoundingClientRect();
+        return rect.height > 0 && y >= rect.top && y < rect.bottom;
+      }) : null;
       if (name) {
         const workspace = gZenWorkspaces.activeWorkspaceElement;
         const separator = s.separator;
@@ -225,12 +257,15 @@
         }
       }
       const first = tabsIn(strip).find(t => t !== tab);
-      if (tab && s.assignments.has(tab) && s.separator?.contains(target)) {
+      if (tab && s.assignments.has(tab) && (s.separator?.contains(target) ||
+          insideX && s.separator && s.headers[0] && y >= s.separator.getBoundingClientRect().top &&
+          y < s.headers[0].getBoundingClientRect().top && !hit && !target.closest?.('.zen-workspace-pinned-tabs-section'))) {
         return {kind:'tab',topic:null,anchor:first,edge:'before',element:s.separator,indicatorEdge:'after'};
       }
-      if (!strip.contains(target)) return null;
-      const header = target.closest?.('.ztt-header');
-      const row = target.closest?.('tab');
+      if (!strip.contains(target) && !inColumn) return null;
+      const hovered = hit || target;
+      const header = hovered.closest?.('.ztt-header');
+      const row = hovered.closest?.('tab');
       const topic = header?.dataset.zttGroup || s.assignments.get(row);
       if (tab) {
         if (!eligible(tab,strip) || row === tab) return null;
@@ -239,7 +274,7 @@
           const items = members(strip,topic).filter(t => t !== tab);
           if (!items.length) return null;
           const firstHeader = s.headers[0] === header;
-          if (firstHeader && !after(header)) return {kind:'tab',topic:null,anchor:items[0],element:header,edge:'before'};
+          if (firstHeader && y <= header.getBoundingClientRect().top + 2) return {kind:'tab',topic:null,anchor:items[0],element:header,edge:'before'};
           return {kind:'tab',topic,anchor:items[0],element:header,edge:'before',indicatorEdge:'after'};
         }
         if (row) {
@@ -276,11 +311,23 @@
       }
       if (dest.kind === 'tab') {
         if (!dest.anchor || dest.anchor === tab) return;
-        if (dest.edge === 'before') gBrowser.moveTabBefore(tab,dest.anchor);
-        else gBrowser.moveTabAfter(tab,dest.anchor);
+        const controller = gBrowser.tabContainer.tabDragAndDrop;
+        const nativeDrag = Boolean(tab._dragData);
+        if (nativeDrag) {
+          controller.finishMoveTogetherSelectedTabs(tab);
+          controller.finishAnimateTabMove();
+          controller._resetTabsAfterDrop(tab);
+        }
         if (dest.topic) s.assignments.set(tab,dest.topic);
         else s.assignments.delete(tab);
         saveGroup(tab,dest.topic);
+        if (dest.edge === 'before') gBrowser.moveTabBefore(tab,dest.anchor);
+        else gBrowser.moveTabAfter(tab,dest.anchor);
+        render(strip);
+        if (nativeDrag && controller._dropLandingArmed && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          controller._landDragImageOnElements?.([tab]);
+        }
+        return;
       } else {
         const moving = members(strip,name);
         if (!moving.length) return;
@@ -466,7 +513,12 @@
           header = node('div', 'ztt-header');
           header.dataset.zttGroup = name;
           const label = node('span', 'ztt-label', name);
-          header.append(label);
+          const close = node('button','ztt-group-close');
+          close.type = 'button';
+          close.title = 'Close group: ' + name;
+          close.setAttribute('aria-label',close.title);
+          close.addEventListener('click',event => { event.stopPropagation(); clear(strip,name); });
+          header.append(label,close);
           header.draggable = true;
           header.tabIndex = 0;
           header.addEventListener('contextmenu', event => openGroupMenu(event,strip,name));
@@ -513,6 +565,11 @@
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
     .ztt-header { height:22px; min-height:22px; margin-top:3px; }
     .ztt-label { flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
+    .ztt-group-close { appearance:none; margin-inline-start:auto; padding:0; border:0; background:transparent; color:inherit;
+      width:22px; height:20px; display:grid; place-items:center; opacity:0; cursor:default; }
+    .ztt-group-close::before { content:''; width:12px; height:12px; background:currentColor;
+      mask:url('resource://content-accessible/close-12.svg') center / contain no-repeat; }
+    .ztt-header:hover .ztt-group-close,.ztt-header:focus-within .ztt-group-close { opacity:.75; }
     .ztt-header { cursor:default; justify-content:flex-start; }
     .ztt-header:focus-visible { outline:2px solid var(--zen-primary-color,#8c70c2); outline-offset:1px; border-radius:4px; }
     .ztt-native-separator > .ztt-tidy {
