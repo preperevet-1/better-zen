@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.10.4
+// @version        0.10.5
 // ==/UserScript==
 (() => {
   'use strict';
@@ -636,7 +636,11 @@
       box-sizing:border-box!important; width:29px!important; height:29px!important;
       padding:5px!important; scale:none!important; background:transparent!important; position:relative; }
     #zen-sidebar-foot-buttons #zen-library-button .zen-library-sprite {
-      --zen-library-sprite-size:19px; width:19px!important; height:19px!important; scale:none!important; }
+      --zen-library-sprite-size:20px; width:20px!important; height:20px!important; scale:none!important; }
+    @media (prefers-reduced-motion:no-preference) {
+      #zen-sidebar-foot-buttons #zen-library-button .zen-library-sprite::before { animation-duration:360ms!important; }
+      #zen-sidebar-foot-buttons #zen-library-button:hover .zen-library-sprite::before { animation-duration:420ms!important; }
+    }
     #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover {
       background:transparent!important; border-color:transparent!important; box-shadow:none!important; }
     #zen-workspaces-button, #zen-workspaces-button[dont-show='true'] {
