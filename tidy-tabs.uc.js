@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.11.2
+// @version        0.11.4
 // ==/UserScript==
 (() => {
   'use strict';
@@ -185,7 +185,7 @@
       finish(event.key === 'Enter');
     });
     input.focus();
-    input.setSelectionRange(input.value.length,input.value.length);
+    input.select();
   }
   function installSelectionMenu() {
     const menu = document.getElementById('tabContextMenu');
@@ -370,17 +370,23 @@
         }
         return lastSlot;
       }
-      const rows = [...strip.children].filter(el => eligible(el,strip) || el.classList.contains('ztt-header'));
-      // A native drag preview can sit under the pointer instead of the destination tab.
-      const hit = inColumn ? rows.find(el => {
+      // Usually the event already names the row. Check its geometry because
+      // Zen can also retarget events to the dragged tab or the strip.
+      const containsY = el => {
         const rect = el.getBoundingClientRect();
-        return rect.height > 0 && y >= rect.top && y < rect.bottom;
-      }) : null;
-      const first = tabsIn(strip).find(t => t !== tab);
+        return y >= rect.top && y < rect.bottom;
+      };
+      const candidate = target.closest?.('tab,.ztt-header');
+      let hit = null;
+      if (inColumn) {
+        if (candidate?.parentElement === strip && containsY(candidate)) hit = candidate;
+        else hit = [...strip.children].find(el =>
+          (eligible(el,strip) || el.classList.contains('ztt-header')) && containsY(el));
+      }
       if (tab && s.assignments.has(tab) && (s.separator?.contains(target) ||
           insideX && s.separator && s.headers[0] && y >= s.separator.getBoundingClientRect().top &&
           y < s.headers[0].getBoundingClientRect().top && !hit && !target.closest?.('.zen-workspace-pinned-tabs-section'))) {
-        return {kind:'tab',topic:null,anchor:first,edge:'before',element:s.separator,indicatorEdge:'after'};
+        return {kind:'tab',topic:null,anchor:tabsIn(strip).find(t => t !== tab),edge:'before',element:s.separator,indicatorEdge:'after'};
       }
       if (!strip.contains(target) && !inColumn) return null;
       const hovered = hit || target;
@@ -389,7 +395,10 @@
       const topic = header?.dataset.zttGroup || s.assignments.get(row);
       if (tab) {
         if (!eligible(tab,strip) || row === tab) return null;
-        const after = el => event.clientY >= el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2;
+        const after = el => {
+          const rect = el.getBoundingClientRect();
+          return y >= rect.top + rect.height / 2;
+        };
         if (header) {
           const items = members(strip,topic).filter(t => t !== tab);
           if (!items.length) return null;
@@ -446,6 +455,19 @@
           controller.finishAnimateTabMove();
           controller._resetTabsAfterDrop(tab);
         }
+        if (dest.topic && s.assignments.get(tab) === dest.topic) {
+          const header = s.headers.find(h => h.dataset.zttGroup === dest.topic);
+          if (header) {
+            // Keep the header before the first member even when either end
+            // of this move is the first tab. Membership is already persisted.
+            const first = header.nextElementSibling;
+            if (dest.edge === 'before') gBrowser.moveTabBefore(tab,dest.anchor);
+            else gBrowser.moveTabAfter(tab,dest.anchor);
+            if (dest.anchor === first && dest.edge === 'before' && tab.previousElementSibling !== header)
+              strip.insertBefore(header,tab);
+            return;
+          }
+        }
         if (dest.topic) s.assignments.set(tab,dest.topic);
         else s.assignments.delete(tab);
         saveGroup(tab,dest.topic);
@@ -474,7 +496,7 @@
       render(strip);
     }
     for (const type of ['dragenter','dragover','drop']) listen(type,handle);
-    listen('dragleave',event => { if (!indicator?.contains(event.relatedTarget)) mark(null); });
+    listen('dragleave',event => { if (!drag?.strip.contains(event.relatedTarget) && !indicator?.contains(event.relatedTarget)) mark(null); });
     listen('dragend',reset);
     abort.signal.addEventListener('abort',reset,{once:true});
   }
