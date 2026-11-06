@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.11.0
+// @version        0.11.1
 // ==/UserScript==
 (() => {
   'use strict';
@@ -156,10 +156,36 @@
   }
   function renameGroup(strip, old) {
     if (busy || strip !== activeStrip()) return;
-    const input = {value:old};
-    if (!Services.prompt.prompt(window,'Rename group','Group name',input,null,{})) return;
-    const value = input.value.trim().slice(0,60);
-    if (value && value !== old) assignManual(strip,members(strip,old),uniqueName(strip,value,old));
+    const header = getState(strip).headers.find(h => h.dataset.zttGroup === old);
+    if (!header || header.querySelector('input')) return;
+    const input = node('input','ztt-name-input');
+    input.value = old;
+    input.maxLength = 60;
+    input.setAttribute('aria-label','Group name');
+    header.draggable = false;
+    header.prepend(input);
+    const finish = commit => {
+      if (!input.isConnected) return;
+      const value = input.value.replace(/\s+/g,' ').trim();
+      input.removeEventListener('blur',cancel);
+      input.remove();
+      header.draggable = true;
+      if (commit && value && value !== old) {
+        const name = uniqueName(strip,value,old);
+        getState(strip).revealed.add(name);
+        assignManual(strip,members(strip,old),name);
+      }
+    };
+    const cancel = () => finish(false);
+    input.addEventListener('blur',cancel);
+    input.addEventListener('keydown',event => {
+      event.stopPropagation();
+      if (event.isComposing || !['Enter','Escape'].includes(event.key)) return;
+      event.preventDefault();
+      finish(event.key === 'Enter');
+    });
+    input.focus();
+    input.select();
   }
   function installSelectionMenu() {
     const menu = document.getElementById('tabContextMenu');
@@ -247,9 +273,10 @@
         return;
       }
       const rect = element.getBoundingClientRect();
+      const headingGap = element.classList.contains('ztt-header') ? 4 : 0;
       gBrowser.tabContainer.tabDragAndDrop._placeDropIndicator({
         left:rect.left + 4, width:Math.max(0,rect.width - 8),
-        top:edge === 'before' ? rect.top : rect.bottom
+        top:edge === 'before' ? rect.top - headingGap : rect.bottom + headingGap
       });
       indicator = element;
     }
@@ -258,7 +285,7 @@
       reset();
       const strip = activeStrip();
       if (busy || !strip) return;
-      if (event.target.closest?.('.ztt-group-close')) { event.preventDefault(); return; }
+      if (event.target.closest?.('.ztt-group-close,.ztt-name-input')) { event.preventDefault(); return; }
       const header = event.target.closest?.('.ztt-header');
       if (header?.parentElement === strip) {
         drag = {strip, name:header.dataset.zttGroup};
@@ -780,6 +807,10 @@
       box-sizing:border-box; min-width:0; margin:3px 5px 0; padding:0 5px;
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
     .ztt-header { height:22px; min-height:22px; margin-top:3px; }
+    .ztt-name-input { min-width:0; flex:1; height:20px; box-sizing:border-box;
+      font:inherit; font-size:12px; font-weight:600; color:inherit; padding:0 2px;
+      border:0; border-radius:4px; background:var(--zen-toolbar-element-bg); }
+    .ztt-name-input ~ .ztt-label { display:none; }
     .ztt-label { line-height:20px; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
     .ztt-group-close { margin-inline-start:auto; margin-inline-end:-8px; }
     .ztt-group-close { flex:none; margin-block:0; appearance:none; padding:0; border:0; background:transparent; color:inherit;
