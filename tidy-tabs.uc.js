@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.10.6
+// @version        0.10.7
 // ==/UserScript==
 (() => {
   'use strict';
@@ -584,7 +584,7 @@
   style.textContent = `
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
-      border-radius:22px; corner-shape:squircle; background:light-dark(#fffefe,#2c2b30); color:light-dark(#171619,#f5f3f7);
+      border-radius:max(28px,calc(2.5 * var(--border-radius-medium,12px))); corner-shape:round; background:light-dark(#fffefe,#2c2b30); color:light-dark(#171619,#f5f3f7);
       box-shadow:0 2px 9px rgb(0 0 0 / .12),0 0 1px rgb(0 0 0 / .15);
       --ztt-accent:var(--zen-primary-color,AccentColor); }
     .ztt-create-list { box-sizing:border-box; width:100%; padding:8px; font:menu; }
@@ -616,6 +616,19 @@
     #urlbar:is(:hover,:focus-within) { --ztt-address-ink:light-dark(#111,#f4f4f4); }
     #urlbar #urlbar-input, #urlbar #urlbar-input::placeholder {
       color:var(--ztt-address-ink)!important; opacity:1; }
+    :root[zen-has-empty-tab="true"] #urlbar #identity-icon-box { margin-inline-end:-3px!important; }
+    #urlbar #urlbar-input::placeholder,
+    :root[zen-has-empty-tab="true"] #urlbar #urlbar-input:placeholder-shown {
+      color:light-dark(#929292,#aaa)!important; text-indent:0!important; }
+    #zen-library-footer [data-l10n-id="library-footer-donate-button"] { display:none!important; }
+    @media (prefers-reduced-motion:no-preference) {
+      :is(#back-button,#forward-button,#reload-button) > .toolbarbutton-icon {
+        transition:translate 140ms ease-out,rotate 170ms ease-out,scale 100ms ease-out!important; }
+      #back-button:not([disabled="true"]):hover > .toolbarbutton-icon { translate:-2px 0; }
+      #forward-button:not([disabled="true"]):hover > .toolbarbutton-icon { translate:2px 0; }
+      #reload-button:not([disabled="true"]):hover > .toolbarbutton-icon { rotate:18deg; }
+      :is(#back-button,#forward-button,#reload-button):not([disabled="true"]):active > .toolbarbutton-icon { scale:.88; }
+    }
     :root[zen-single-toolbar="true"] .zen-essentials-container:not(:empty) {
       padding-bottom:4px!important; }
     /* Native navigation: 31×29 hit area, 29×29 hover surface, 17×17 artwork. */
@@ -772,23 +785,6 @@
       const saved = (boosts.loadBoostsFromStore(uri.host) || []).filter(b => b.boostEntry.boostData.changeWasMade);
       return {uri, existing:saved.find(b => b.id === boosts.getActiveBoostId(uri.host)) || saved[0]};
     }
-    // Supply the reference shortcut when Zen has no binding for New Split.
-    const splitCommand = 'cmd_zenNewEmptySplit';
-    const nativeSplit = document.getElementById('zen-new-empty-split-view');
-    const hasSplitKey = () => nativeSplit && nativeSplit.getAttribute('disabled') !== 'true' &&
-      (nativeSplit.getAttribute('keycode') || (nativeSplit.getAttribute('key') && nativeSplit.getAttribute('key') !== '*'));
-    const splitKeys = document.createXULElement('keyset');
-    const fallback = document.createXULElement('key');
-    fallback.setAttribute('keycode','VK_EQUALS');
-    fallback.setAttribute('modifiers','control,shift');
-    fallback.setAttribute('command',splitCommand);
-    splitKeys.append(fallback);
-    document.documentElement.append(splitKeys);
-    const syncSplit = () => { if (hasSplitKey()) fallback.setAttribute('disabled','true'); else fallback.removeAttribute('disabled'); };
-    syncSplit();
-    const keyObserver = new MutationObserver(syncSplit);
-    if (nativeSplit) keyObserver.observe(nativeSplit,{attributes:true});
-    abort.signal.addEventListener('abort',()=>{keyObserver.disconnect();splitKeys.remove();},{once:true});
     const motionFrames = [
       {opacity:0, transform:'translateY(3px) scale(.96)'},
       {opacity:1, transform:'none'}
@@ -842,10 +838,11 @@
         }
         const cmd = document.getElementById(command);
         row.disabled = !cmd || cmd.getAttribute('disabled') === 'true';
-        const key = command === splitCommand ? (hasSplitKey() ? nativeSplit : fallback) : command === 'cmd_newNavigatorTab' ? document.getElementById('key_newNavigatorTab') :
-          document.querySelector('key[command="'+command+'"]:not([disabled="true"])');
-        shortcut.textContent = key === fallback ? (navigator.platform.startsWith('Mac') ? '⌃⇧=' : 'Ctrl+Shift+=') :
-          key && key.getAttribute('key') !== '*' ? ShortcutUtils.prettifyShortcut(key) : '';
+        const nativeCommand = command === 'cmd_newNavigatorTab' ? 'cmd_newNavigatorTabNoEvent' : command;
+        const key = [...document.querySelectorAll('key[command="'+nativeCommand+'"]')].find(k =>
+          !k.closest('[disabled="true"]') && (k.getAttribute('keycode') ||
+          (k.getAttribute('key') && k.getAttribute('key') !== '*')));
+        shortcut.textContent = key ? ShortcutUtils.prettifyShortcut(key) : '';
       }
       panel.showPopover();
       plus?.setAttribute('ztt-create-open','');
