@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.11.1
+// @version        0.11.2
 // ==/UserScript==
 (() => {
   'use strict';
@@ -185,7 +185,7 @@
       finish(event.key === 'Enter');
     });
     input.focus();
-    input.select();
+    input.setSelectionRange(input.value.length,input.value.length);
   }
   function installSelectionMenu() {
     const menu = document.getElementById('tabContextMenu');
@@ -807,9 +807,10 @@
       box-sizing:border-box; min-width:0; margin:3px 5px 0; padding:0 5px;
       color:inherit; font:inherit; -moz-window-dragging:no-drag; }
     .ztt-header { height:22px; min-height:22px; margin-top:3px; }
-    .ztt-name-input { min-width:0; flex:1; height:20px; box-sizing:border-box;
-      font:inherit; font-size:12px; font-weight:600; color:inherit; padding:0 2px;
-      border:0; border-radius:4px; background:var(--zen-toolbar-element-bg); }
+    .ztt-header > .ztt-name-input { appearance:none!important; min-width:0; flex:1; height:20px;
+      box-sizing:border-box; font:inherit; font-size:12px; font-weight:600; line-height:20px;
+      color:inherit; caret-color:currentColor; margin:0!important; padding:0!important;
+      border:0!important; outline:0!important; box-shadow:none!important; background:transparent!important; }
     .ztt-name-input ~ .ztt-label { display:none; }
     .ztt-label { line-height:20px; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
     .ztt-group-close { margin-inline-start:auto; margin-inline-end:-8px; }
