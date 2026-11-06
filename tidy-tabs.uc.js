@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.10.9
+// @version        0.11.0
 // ==/UserScript==
 (() => {
   'use strict';
@@ -99,11 +99,15 @@
   const tabsIn = strip => [...strip.children].filter(t => eligible(t, strip));
   const {SessionStore} = ChromeUtils.importESModule('moz-src:///browser/components/sessionstore/SessionStore.sys.mjs');
   const sessionKey = 'zen-tidy-tabs-group-v1';
+  const manualTabs = new WeakSet();
   function saveGroup(tab, name) {
     if (name) {
       const workspace = tab.getAttribute('zen-workspace-id') || gZenWorkspaces.activeWorkspace;
-      SessionStore.setCustomTabValue(tab, sessionKey, JSON.stringify({workspace,name}));
-    } else SessionStore.deleteCustomTabValue(tab, sessionKey);
+      SessionStore.setCustomTabValue(tab, sessionKey, JSON.stringify({workspace,name,manual:manualTabs.has(tab)}));
+    } else {
+      manualTabs.delete(tab);
+      SessionStore.deleteCustomTabValue(tab, sessionKey);
+    }
   }
   function restoreGroups(strip, state) {
     for (const tab of tabsIn(strip)) {
@@ -111,9 +115,10 @@
       const value = SessionStore.getCustomTabValue(tab, sessionKey);
       if (!value) continue;
       try {
-        const {name, workspace} = JSON.parse(value);
+        const {name, workspace, manual} = JSON.parse(value);
         if (workspace === gZenWorkspaces.activeWorkspace && typeof name === 'string' && name.length && name.length <= 60) {
-          const topic = /^(?:https?:|www\.)|^(?:[\w-]+\.)+[a-z]{2,}$/i.test(name) ? classify({url:tab.linkedBrowser?.currentURI?.spec,title:tab.label}) : name === 'Games' ? 'Gaming' : name;
+          if (manual) manualTabs.add(tab);
+          const topic = manual ? name : /^(?:https?:|www\.)|^(?:[\w-]+\.)+[a-z]{2,}$/i.test(name) ? classify({url:tab.linkedBrowser?.currentURI?.spec,title:tab.label}) : name === 'Games' ? 'Gaming' : name;
           state.assignments.set(tab,topic);
           state.revealed.add(topic);
           if (topic !== name) saveGroup(tab,topic);
@@ -132,11 +137,56 @@
   function removeHeaders(s) {
     s.headers.forEach(h => h.remove()); s.headers = [];
   }
+  function uniqueName(strip, base, except) {
+    const names = new Set(getState(strip).assignments.values());
+    let name = base;
+    for (let i = 2; names.has(name) && name !== except; i++) {
+      const suffix = ' ' + i;
+      name = base.slice(0,60-suffix.length) + suffix;
+    }
+    return name;
+  }
+  function assignManual(strip, tabs, name) {
+    for (const tab of tabs) {
+      manualTabs.add(tab);
+      getState(strip).assignments.set(tab,name);
+      saveGroup(tab,name);
+    }
+    render(strip);
+  }
+  function renameGroup(strip, old) {
+    if (busy || strip !== activeStrip()) return;
+    const input = {value:old};
+    if (!Services.prompt.prompt(window,'Rename group','Group name',input,null,{})) return;
+    const value = input.value.trim().slice(0,60);
+    if (value && value !== old) assignManual(strip,members(strip,old),uniqueName(strip,value,old));
+  }
+  function installSelectionMenu() {
+    const menu = document.getElementById('tabContextMenu');
+    const item = document.createXULElement('menuitem');
+    item.setAttribute('label','Group Selected Tabs');
+    const anchor = document.getElementById('context_moveTabToGroup');
+    menu.insertBefore(item,anchor?.parentElement === menu ? anchor : menu.firstElementChild);
+    function selection(strip) {
+      const tabs = gBrowser.selectedTabs;
+      return strip && !busy && tabs.includes(TabContextMenu.contextTab) && tabs.length >= 2 &&
+        tabs.every(tab => eligible(tab,strip)) ? tabs : [];
+    }
+    menu.addEventListener('popupshowing',event => {
+      if (event.target === menu) item.hidden = !selection(activeStrip()).length;
+    },{signal:abort.signal});
+    item.addEventListener('command',() => {
+      const strip = activeStrip(), tabs = selection(strip);
+      if (tabs.length) assignManual(strip,tabs,uniqueName(strip,'New Group'));
+    });
+    abort.signal.addEventListener('abort',()=>item.remove(),{once:true});
+  }
   function openGroupMenu(event, strip, name) {
     event.preventDefault(); event.stopPropagation();
     groupMenu?.remove();
     groupMenu = document.createXULElement('menupopup');
     for (const [label, action] of [
+      ['Rename group', () => renameGroup(strip,name)],
       ['Create pinned folder', () => folder(strip, name)],
       ['Ungroup', () => {
         if (busy || strip !== activeStrip()) return;
@@ -229,8 +279,14 @@
         const flavor = 'application/x-moz-tabbrowser-tab';
         const native = event.dataTransfer?.types.includes(flavor) && event.dataTransfer.mozGetDataAt(flavor,0);
         if (native) {
-          if (!eligible(native,active) || native.multiselected && gBrowser.selectedTabs.length > 1) return null;
-          drag = {strip:active,tab:native};
+          const source = native.isZenFolder ? native : native.localName !== 'tab' && native.closest?.('zen-folder');
+          if (source?.isZenFolder && !source.isLiveFolder && gZenWorkspaces.activeWorkspaceElement.contains(source) &&
+              source.allItems.every(el => el.localName === 'tab') && source.tabs.some(t => !t.hasAttribute('zen-empty-tab'))) {
+            drag = {strip:active,source};
+          } else {
+            if (!eligible(native,active) || native.multiselected && gBrowser.selectedTabs.length > 1) return null;
+            drag = {strip:active,tab:native};
+          }
         }
       }
       if (!drag || drag.strip !== active) return null;
@@ -241,6 +297,15 @@
       const bounds = strip.getBoundingClientRect();
       const insideX = event.clientX >= bounds.left && event.clientX <= bounds.right;
       const inColumn = insideX && y >= bounds.top && y <= bounds.bottom;
+      if (drag.source) {
+        if (!strip.contains(target) && !inColumn) return null;
+        for (const header of s.headers) {
+          const last = members(strip,header.dataset.zttGroup).at(-1);
+          if (last && y < (header.getBoundingClientRect().top + last.getBoundingClientRect().bottom)/2)
+            return {kind:'unpin',element:header,edge:'before',anchor:members(strip,header.dataset.zttGroup)[0]};
+        }
+        return {kind:'unpin',element:tabsIn(strip).at(-1) || strip,edge:'after'};
+      }
       if (name) {
         const separator = s.separator;
         const section = separator?.parentElement;
@@ -324,9 +389,23 @@
       event.preventDefault(); event.stopImmediatePropagation();
       event.dataTransfer.dropEffect = 'move';
       if (event.type !== 'drop') { mark(dest.element,dest.indicatorEdge || dest.edge); return; }
-      const {strip, name, tab} = drag;
+      const {strip, name, tab, source} = drag;
       reset();
       const s = getState(strip);
+      if (dest.kind === 'unpin') {
+        const label = uniqueName(strip,(source.label || 'New Group').slice(0,60));
+        const tabs = [...source.tabs].filter(t => !t.hasAttribute('zen-empty-tab'));
+        const ordered = tabsIn(strip);
+        ordered.splice(dest.anchor ? ordered.indexOf(dest.anchor) : ordered.length,0,...tabs);
+        const convert = async () => {
+          await source.unpackTabs();
+          for (const member of tabs) gBrowser.unpinTab(member);
+          moveInOrder(strip,ordered);
+          assignManual(strip,tabs,label);
+        };
+        convert().catch(report);
+        return;
+      }
       if (dest.kind === 'folder') {
         Promise.resolve().then(() => folder(strip,name,dest.insertBefore)).catch(report);
         return;
@@ -462,7 +541,7 @@
       s.assignments.clear();
       s.revealed.clear();
       for (const [name, items] of groups) for (const tab of items) s.assignments.set(tab, name);
-      for (const tab of tabs) saveGroup(tab, s.assignments.get(tab));
+      for (const tab of tabs) { manualTabs.delete(tab); saveGroup(tab, s.assignments.get(tab)); }
       removeHeaders(s);
       moveInOrder(strip, loose.concat([...groups.values()].flat()));
     } finally {
@@ -511,7 +590,7 @@
     // all headers, even when Zen inserts them next to the selected tab.
     const counts = new Map();
     for (const name of s.assignments.values()) counts.set(name, (counts.get(name) || 0) + 1);
-    for (const [tab, name] of s.assignments) if (counts.get(name) < 2) s.assignments.delete(tab);
+    for (const [tab, name] of s.assignments) if (counts.get(name) < 2 && !manualTabs.has(tab)) { s.assignments.delete(tab); saveGroup(tab,null); }
     const current = tabsIn(strip);
     const loose = current.filter(tab => !s.assignments.has(tab));
     const blocks = new Map();
@@ -529,7 +608,7 @@
     let revealIndex = 0;
     for (const tab of tabsIn(strip)) {
       const name = s.assignments.get(tab);
-      if (name && name !== lastName && members(strip, name).length >= 2) {
+      if (name && name !== lastName && (manualTabs.has(tab) || members(strip, name).length >= 2)) {
         let header = previous.find(h => h.dataset.zttGroup === name && !kept.includes(h));
         if (!header) {
           header = node('div', 'ztt-header');
@@ -541,6 +620,9 @@
           close.setAttribute('aria-label',close.title);
           close.addEventListener('click',event => { event.stopPropagation(); clear(strip,name); });
           header.append(label,close);
+          header.addEventListener('dblclick',event => {
+            if (!event.target.closest('button')) renameGroup(strip,name);
+          });
           header.draggable = true;
           header.tabIndex = 0;
           header.addEventListener('contextmenu', event => openGroupMenu(event,strip,name));
@@ -620,6 +702,13 @@
     #urlbar #urlbar-input::placeholder,
     :root[zen-has-empty-tab="true"] #urlbar #urlbar-input:placeholder-shown {
       color:light-dark(#929292,#aaa)!important; text-indent:0!important; }
+     .zen-essentials-container .tabbrowser-tab[zen-essential="true"]:hover .tab-background {
+      background-color:var(--zen-toolbar-element-bg-hover)!important; }
+    @media (prefers-reduced-motion:no-preference) {
+      #urlbar:not([breakout-extend]) .urlbar-background,
+       .zen-essentials-container .tabbrowser-tab[zen-essential="true"] .tab-background {
+        transition:background-color 110ms ease-out!important; }
+    }
     #zen-library-footer [data-l10n-id="library-footer-donate-button"] { display:none!important; }
     :is(#back-button,#forward-button,#reload-button) { position:relative; }
     :is(#back-button,#forward-button,#reload-button)::before {
@@ -940,6 +1029,7 @@
     installCreateMenu();
     installInsertionHook();
     installDrag();
+    installSelectionMenu();
     for (const event of ['SSTabRestored','SSTabRestoring','TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
       gBrowser.tabContainer.addEventListener(event, schedule, { signal:abort.signal });
     }
