@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.10.5
+// @version        0.10.6
 // ==/UserScript==
 (() => {
   'use strict';
@@ -593,7 +593,7 @@
       font:inherit; font-size:13px; font-weight:600; border:0; outline:0; border-radius:14px; corner-shape:squircle; background:transparent; }
     .ztt-create-row:enabled:is(:hover,:focus-visible) { background:color-mix(in srgb,var(--ztt-accent) 18%,light-dark(#e6e3e9,#49454f)); }
     .ztt-create-row:disabled { opacity:.45; }
-    .ztt-create-icon { flex:0 0 22px; height:22px; background:currentColor; mask: no-repeat center / contain; }
+    .ztt-create-icon { flex:0 0 26.4px; height:26.4px; background:currentColor; mask: no-repeat center / contain; }
     .ztt-create-shortcut { margin-inline-start:auto; color:color-mix(in srgb,var(--ztt-accent) 70%,currentColor);
       opacity:.8; font-weight:550; white-space:nowrap; }
     .ztt-create-divider { border:0; border-top:1px solid color-mix(in srgb,currentColor 12%,transparent); margin:8px 4px; }
@@ -752,7 +752,7 @@
     const {ShortcutUtils} = ChromeUtils.importESModule('resource://gre/modules/ShortcutUtils.sys.mjs');
     const panel = node('div');
     panel.id = 'ztt-create-panel';
-    panel.popover = 'auto';
+    panel.popover = 'manual';
     panel.tabIndex = -1;
     panel.setAttribute('role','menu');
     panel.setAttribute('aria-label','Create');
@@ -789,6 +789,30 @@
     const keyObserver = new MutationObserver(syncSplit);
     if (nativeSplit) keyObserver.observe(nativeSplit,{attributes:true});
     abort.signal.addEventListener('abort',()=>{keyObserver.disconnect();splitKeys.remove();},{once:true});
+    const motionFrames = [
+      {opacity:0, transform:'translateY(3px) scale(.96)'},
+      {opacity:1, transform:'none'}
+    ];
+    let motion = null, closing = false;
+    function closeMenu() {
+      if (closing || !panel.matches(':popover-open')) return;
+      closing = true;
+      panel.inert = true;
+      plus?.removeAttribute('ztt-create-open');
+      const finish = () => {
+        if (!closing) return;
+        panel.hidePopover();
+        panel.inert = false;
+        closing = false;
+      };
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
+      if (motion && motion.playState !== 'idle') {
+        motion.reverse();
+      } else {
+        motion = panel.animate(motionFrames,{duration:120,easing:'cubic-bezier(.2,.8,.2,1)',direction:'reverse'});
+      }
+      motion.onfinish = finish;
+    }
     const rows = actions.map(([label,icon,command]) => {
       if (icon === 'boost' || icon === 'split view') list.append(node('hr','ztt-create-divider'));
       const row = node('button','ztt-create-row');
@@ -798,7 +822,7 @@
       const title = node('span','',label), shortcut = node('span','ztt-create-shortcut');
       row.append(glyph,title,shortcut); list.append(row);
       row.addEventListener('click',() => {
-        panel.hidePopover();
+        closeMenu();
         if (command) { document.getElementById(command)?.doCommand(); return; }
         const site = siteBoost();
         if (site) boosts.openBoostWindow(window,site.existing || boosts.createNewBoost(site.uri.host),site.uri);
@@ -806,6 +830,9 @@
       return {row,title,shortcut,command};
     });
     function showMenu() {
+      if (motion) { motion.onfinish = null; motion.cancel(); motion = null; }
+      closing = false;
+      panel.inert = false;
       for (const {row,title,shortcut,command} of rows) {
         if (!command) {
           const site = siteBoost();
@@ -821,12 +848,10 @@
           key && key.getAttribute('key') !== '*' ? ShortcutUtils.prettifyShortcut(key) : '';
       }
       panel.showPopover();
+      plus?.setAttribute('ztt-create-open','');
       positionMenu();
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        panel.animate([
-          {opacity:0, transform:'translateY(3px) scale(.96)'},
-          {opacity:1, transform:'none'}
-        ], {duration:120,easing:'cubic-bezier(.2,.8,.2,1)'});
+        motion = panel.animate(motionFrames,{duration:120,easing:'cubic-bezier(.2,.8,.2,1)',fill:'both'});
       }
       panel.focus({preventScroll:true});
     }
@@ -855,6 +880,16 @@
     });
     const plus = document.getElementById('zen-create-new-button');
     const options = {capture:true,signal:abort.signal};
+    document.addEventListener('pointerdown',event=>{
+      const path = event.composedPath();
+      if (!path.includes(panel) && !path.includes(plus)) closeMenu();
+    },options);
+    window.addEventListener('keydown',event=>{
+      if (event.key === 'Escape' && panel.matches(':popover-open')) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        closeMenu(); plus?.focus();
+      }
+    },options);
     let closeOnClick = false;
     plus?.addEventListener('pointerdown',event=>{
       if (event.button === 0) closeOnClick = panel.matches(':popover-open');
@@ -865,7 +900,7 @@
     plus?.addEventListener('click',event=>{
       if (event.button !== 0) return;
       event.preventDefault(); event.stopImmediatePropagation();
-      if (closeOnClick || panel.matches(':popover-open')) panel.hidePopover();
+      if (!closing && (closeOnClick || panel.matches(':popover-open'))) closeMenu();
       else showMenu();
       closeOnClick = false;
     },options);

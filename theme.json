@@ -2,7 +2,7 @@
   "id": "zen-tidy-tabs",
   "name": "Tidy Tabs",
   "description": "Organize Zen tabs by topic using local rules.",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "author": "Artem",
   "style": "chrome.css",
   "readme": "README.md",
