@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.11.4
+// @version        0.12.0
 // ==/UserScript==
 (() => {
   'use strict';
@@ -422,6 +422,12 @@
     function handle(event) {
       const dest = destination(event);
       if (!dest) { mark(null); return; }
+      if (event.type !== 'drop' && dest.kind === 'tab' && drag?.tab?._dragData && dest.topic &&
+          getState(drag.strip).assignments.get(drag.tab) === dest.topic &&
+          event.target.closest?.('tab') === dest.anchor) {
+        mark(null);
+        return;
+      }
       event.preventDefault(); event.stopImmediatePropagation();
       event.dataTransfer.dropEffect = 'move';
       if (event.type !== 'drop') { mark(dest.element,dest.indicatorEdge || dest.edge); return; }
@@ -461,10 +467,18 @@
             // Keep the header before the first member even when either end
             // of this move is the first tab. Membership is already persisted.
             const first = header.nextElementSibling;
+            const before = new Map(members(strip,dest.topic).map(t => [t,t.getBoundingClientRect().top]));
             if (dest.edge === 'before') gBrowser.moveTabBefore(tab,dest.anchor);
             else gBrowser.moveTabAfter(tab,dest.anchor);
             if (dest.anchor === first && dest.edge === 'before' && tab.previousElementSibling !== header)
               strip.insertBefore(header,tab);
+            if (!matchMedia('(prefers-reduced-motion:reduce)').matches) {
+              for (const [member,top] of before) {
+                const delta = top - member.getBoundingClientRect().top;
+                if (delta) member.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],
+                  {duration:150,easing:'cubic-bezier(.2,.8,.2,1)'});
+              }
+            }
             return;
           }
         }
@@ -772,9 +786,9 @@
     @media (prefers-reduced-motion:no-preference) {
       :is(#back-button,#forward-button,#reload-button) > .toolbarbutton-icon {
         transition:translate 140ms ease-out,rotate 170ms ease-out,scale 100ms ease-out!important; }
-      #back-button:not([disabled="true"]):hover > .toolbarbutton-icon { translate:-2px 0; }
-      #forward-button:not([disabled="true"]):hover > .toolbarbutton-icon { translate:2px 0; }
-      #reload-button:not([disabled="true"]):hover > .toolbarbutton-icon { rotate:18deg; }
+      #back-button:not([disabled="true"]):active > .toolbarbutton-icon { translate:-2px 0; }
+      #forward-button:not([disabled="true"]):active > .toolbarbutton-icon { translate:2px 0; }
+      #reload-button:not([disabled="true"]):active > .toolbarbutton-icon { rotate:18deg; }
       :is(#back-button,#forward-button,#reload-button):not([disabled="true"]):active > .toolbarbutton-icon { scale:.88; }
     }
     :root[zen-single-toolbar="true"] .zen-essentials-container:not(:empty) {
@@ -833,6 +847,20 @@
       box-sizing:border-box; font:inherit; font-size:12px; font-weight:600; line-height:20px;
       color:inherit; caret-color:currentColor; margin:0!important; padding:0!important;
       border:0!important; outline:0!important; box-shadow:none!important; background:transparent!important; }
+    .ztt-original-folder { display:none!important; }
+    .ztt-folder-art { width:24px; height:24px; overflow:visible;
+      --ztt-folder-color:var(--zen-primary-color,#7486b8); }
+    .ztt-folder-art path { stroke:color-mix(in srgb,var(--ztt-folder-color),black 28%); stroke-width:1; }
+    .ztt-folder-back { fill:color-mix(in srgb,var(--ztt-folder-color),black 21%); }
+    .ztt-folder-paper { fill:white; stroke:none!important; }
+    .ztt-folder-front { fill:color-mix(in srgb,var(--ztt-folder-color),white 18%); }
+    .ztt-folder-art[state="open"] .ztt-folder-back { d:path("M4.066 5.199Q4 3 6.2 3.0L9.8 3.0Q11.2 3 12.19 3.99L13.21 5.01Q14.2 6 15.6 6.0L24.8 6.0Q27 6 27.078 8.199L27.522 20.801Q27.6 23 25.4 23.0L6.8 23.0Q4.6 23 4.534 20.801Z"); }
+    .ztt-folder-art[state="open"] .ztt-folder-front { d:path("M6.55 14.783Q6.8 13 8.6 13.0L27.5 13.0Q29.3 13 28.998 14.775L27.902 21.225Q27.6 23 25.8 23.0L7.2 23.0Q5.4 23 5.65 21.217Z"); }
+    .ztt-folder-art[state="open"] .ztt-folder-paper { translate:.9px 0; }
+    @media(prefers-reduced-motion:no-preference) {
+      .ztt-folder-art path { transition:d 180ms ease-out,translate 180ms ease-out; }
+      #urlbar #urlbar-input, #urlbar #urlbar-input::placeholder { transition:color 110ms ease-out!important; }
+    }
     .ztt-name-input ~ .ztt-label { display:none; }
     .ztt-label { line-height:20px; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; opacity:.68; }
     .ztt-group-close { margin-inline-start:auto; margin-inline-end:-8px; }
@@ -1076,11 +1104,61 @@
     });
     abort.signal.addEventListener('abort',()=>{panel.hidePopover(); panel.remove();document.getElementById('zen-create-new-button')?.removeAttribute('open');},{once:true});
   }
+  function installFolderMotion() {
+    const entries = new Map();
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const attach = folder => {
+      if (entries.has(folder)) return;
+      const original = folder.icon?.querySelector('svg');
+      if (!original) return;
+      const icon = document.createElementNS(svgNS,'svg');
+      icon.setAttribute('viewBox','0 -2 31 29');
+      icon.classList.add('ztt-folder-art');
+      icon.setAttribute('aria-hidden','true');
+      for (const [cls,d] of [['ztt-folder-back','M4.0 4.2Q4 2 6.2 2.0L9.8 2.0Q11.2 2 12.19 2.99L13.21 4.01Q14.2 5 15.6 5.0L24.8 5.0Q27 5 27.0 7.2L27.0 20.8Q27 23 24.8 23.0L6.2 23.0Q4 23 4.0 20.8Z'],['ztt-folder-paper','M8 9H23V18H8Z'],['ztt-folder-front','M4.0 7.2Q4 5 6.2 5.0L24.8 5.0Q27 5 27.0 7.2L27.0 20.8Q27 23 24.8 23.0L6.2 23.0Q4 23 4.0 20.8Z']]) {
+        const path = document.createElementNS(svgNS,'path');
+        path.setAttribute('class',cls);path.setAttribute('d',d);icon.append(path);
+      }
+      original.classList.add('ztt-original-folder');
+      original.after(icon);
+      let wasCollapsed = folder.collapsed;
+      const sync = () => {
+        icon.setAttribute('state',original.getAttribute('state') || (folder.collapsed ? 'close' : 'open'));
+        if (wasCollapsed && !folder.collapsed && !matchMedia('(prefers-reduced-motion:reduce)').matches) {
+          for (const tab of folder.tabs.filter(t => !t.hasAttribute('zen-empty-tab') && !t.hidden)) {
+            tab.animate([{opacity:0,translate:'0 -4px'},{opacity:1,translate:'0 0'}],
+              {duration:150,easing:'ease-out'});
+          }
+        }
+        wasCollapsed = folder.collapsed;
+      };
+      const changes = new MutationObserver(sync);
+      changes.observe(original,{attributes:true,attributeFilter:['state']});
+      changes.observe(folder,{attributes:true,attributeFilter:['collapsed']});
+      entries.set(folder,{icon,original,changes});sync();
+    };
+    const scan = () => {
+      for (const [folder,entry] of entries) if (!folder.isConnected) {
+        entry.changes.disconnect(); entries.delete(folder);
+      }
+      document.querySelectorAll('zen-folder').forEach(attach);
+    };
+    const changes = new MutationObserver(scan);
+    changes.observe(gBrowser.tabContainer,{childList:true,subtree:true});
+    scan();
+    abort.signal.addEventListener('abort',()=>{
+      changes.disconnect();
+      for (const entry of entries.values()) {
+        entry.changes.disconnect();entry.icon.remove();entry.original.classList.remove('ztt-original-folder');
+      }
+    },{once:true});
+  }
   function init() {
     if (destroyed) return;
     if (!window.gBrowser || !window.gZenWorkspaces) { startupTimer = setTimeout(init, 250); return; }
     document.documentElement.append(style);
     installCreateMenu();
+    installFolderMotion();
     installInsertionHook();
     installDrag();
     installSelectionMenu();
