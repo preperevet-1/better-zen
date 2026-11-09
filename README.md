@@ -1,4 +1,4 @@
-# Zen Tidy Tabs 0.12.1
+# Zen Tidy Tabs 0.12.2
 
 Tidy групує вільні вкладки активного простору за локальними правилами. Назви груп англійською задає список RULES у `tidy-tabs.uc.js`. Мод розпізнає тему за доменом, словами в назві вкладки та пошуковим запитом. Наприклад, пошук SpaceX і сторінки NASA потрапляють до Space, Claude і ChatGPT — до AI, а Steam, Poki та Minecraft — до Gaming. Browsers об’єднує Zen, Arc, Dia, Firefox та релізи репозиторію zen-browser на GitHub. Серед інших тем є Social Media, News, Programming, Learning, Travel, Food і Sports. Сторінки без спільної відомої теми збираються в Other, якщо їх принаймні дві. Одна така вкладка залишається вгорі.
 

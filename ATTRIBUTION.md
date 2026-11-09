@@ -7,4 +7,4 @@ The folder and close SVGs were supplied by the user (SF Symbols exports). Their 
 
 The five create-menu glyphs are Apple SF Symbols rendered through AppKit at medium weight.
 
-Folder geometry adapted from Kubai Icons, Copyright (c) 2026 Kubai087. https://github.com/kubai087/kubai-icons/blob/master/icons/folder.js. See KUBAI-LICENSE.txt.
+Folder uses the official kubai-icons 0.3.1 package, including its SVG, filters, gradients and animation runtime (MIT). https://www.npmjs.com/package/kubai-icons. See KUBAI-LICENSE.txt.
