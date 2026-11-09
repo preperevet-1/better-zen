@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.12.2
+// @version        0.12.3
 // ==/UserScript==
 (() => {
   'use strict';
@@ -847,11 +847,17 @@
       box-sizing:border-box; font:inherit; font-size:12px; font-weight:600; line-height:20px;
       color:inherit; caret-color:currentColor; margin:0!important; padding:0!important;
       border:0!important; outline:0!important; box-shadow:none!important; background:transparent!important; }
+    :root[zen-sidebar-expanded="true"] zen-folder > .tab-group-label-container .tab-group-folder-icon {
+      left:9px!important; }
+    :root[zen-sidebar-expanded="true"] zen-folder > .tab-group-label-container > :is(label,#tab-label-input) {
+      padding-inline-start:36px!important; }
     .ztt-original-folder { display:none!important; }
     zen-folder .tab-group-folder-icon .ztt-folder-art {
       width:24px!important; height:24px!important;
       filter:none!important; transform:none!important;
-      color:var(--zen-primary-color,#5393FF)!important; }
+      color:light-dark(
+        oklch(from var(--zen-primary-color,#5393FF) min(l,.62) c h),
+        oklch(from var(--zen-primary-color,#5393FF) max(l,.65) c h))!important; }
     zen-folder .ztt-folder-art :is(path,g,rect) { transition:none!important; }
     @media(prefers-reduced-motion:no-preference) {
       #urlbar #urlbar-input, #urlbar #urlbar-input::placeholder { transition:color 110ms ease-out!important; }
