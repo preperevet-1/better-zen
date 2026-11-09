@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.12.0
+// @version        0.12.1
 // ==/UserScript==
 (() => {
   'use strict';
@@ -848,12 +848,14 @@
       color:inherit; caret-color:currentColor; margin:0!important; padding:0!important;
       border:0!important; outline:0!important; box-shadow:none!important; background:transparent!important; }
     .ztt-original-folder { display:none!important; }
-    .ztt-folder-art { width:24px; height:24px; overflow:visible;
-      --ztt-folder-color:var(--zen-primary-color,#7486b8); }
-    .ztt-folder-art path { stroke:color-mix(in srgb,var(--ztt-folder-color),black 28%); stroke-width:1; }
-    .ztt-folder-back { fill:color-mix(in srgb,var(--ztt-folder-color),black 21%); }
+    zen-folder .tab-group-folder-icon .ztt-folder-art {
+      width:28px!important; height:28px!important; overflow:visible;
+      filter:none!important; transform:none!important;
+      --ztt-folder-color:oklch(from var(--zen-primary-color,#7486b8) clamp(.48,l,.72) c h); }
+    .ztt-folder-art path { stroke:color-mix(in srgb,var(--ztt-folder-color),black 28%); stroke-width:1.5; stroke-linejoin:round; }
+    .ztt-folder-back { fill:color-mix(in srgb,var(--ztt-folder-color),black 21%);
+      filter:drop-shadow(0 1px 1px rgb(0 0 0 / .18)); }
     .ztt-folder-paper { fill:white; stroke:none!important; }
-    .ztt-folder-front { fill:color-mix(in srgb,var(--ztt-folder-color),white 18%); }
     .ztt-folder-art[state="open"] .ztt-folder-back { d:path("M4.066 5.199Q4 3 6.2 3.0L9.8 3.0Q11.2 3 12.19 3.99L13.21 5.01Q14.2 6 15.6 6.0L24.8 6.0Q27 6 27.078 8.199L27.522 20.801Q27.6 23 25.4 23.0L6.8 23.0Q4.6 23 4.534 20.801Z"); }
     .ztt-folder-art[state="open"] .ztt-folder-front { d:path("M6.55 14.783Q6.8 13 8.6 13.0L27.5 13.0Q29.3 13 28.998 14.775L27.902 21.225Q27.6 23 25.8 23.0L7.2 23.0Q5.4 23 5.65 21.217Z"); }
     .ztt-folder-art[state="open"] .ztt-folder-paper { translate:.9px 0; }
@@ -1106,6 +1108,7 @@
   }
   function installFolderMotion() {
     const entries = new Map();
+    let folderIconId = 0;
     const svgNS = 'http://www.w3.org/2000/svg';
     const attach = folder => {
       if (entries.has(folder)) return;
@@ -1115,15 +1118,27 @@
       icon.setAttribute('viewBox','0 -2 31 29');
       icon.classList.add('ztt-folder-art');
       icon.setAttribute('aria-hidden','true');
+      const defs = document.createElementNS(svgNS,'defs');
+      const gradient = document.createElementNS(svgNS,'linearGradient');
+      const gradientId = 'ztt-folder-gradient-' + (++folderIconId);
+      gradient.id = gradientId;
+      gradient.setAttribute('x2','0');gradient.setAttribute('y2','1');
+      for (const [offset,color] of [['0%','color-mix(in srgb,var(--ztt-folder-color),white 28%)'],['100%','color-mix(in srgb,var(--ztt-folder-color),white 8%)']]) {
+        const stop = document.createElementNS(svgNS,'stop');
+        stop.setAttribute('offset',offset);stop.style.stopColor=color;gradient.append(stop);
+      }
+      defs.append(gradient);icon.append(defs);
       for (const [cls,d] of [['ztt-folder-back','M4.0 4.2Q4 2 6.2 2.0L9.8 2.0Q11.2 2 12.19 2.99L13.21 4.01Q14.2 5 15.6 5.0L24.8 5.0Q27 5 27.0 7.2L27.0 20.8Q27 23 24.8 23.0L6.2 23.0Q4 23 4.0 20.8Z'],['ztt-folder-paper','M8 9H23V18H8Z'],['ztt-folder-front','M4.0 7.2Q4 5 6.2 5.0L24.8 5.0Q27 5 27.0 7.2L27.0 20.8Q27 23 24.8 23.0L6.2 23.0Q4 23 4.0 20.8Z']]) {
         const path = document.createElementNS(svgNS,'path');
-        path.setAttribute('class',cls);path.setAttribute('d',d);icon.append(path);
+        path.setAttribute('class',cls);path.setAttribute('d',d);
+        if (cls === 'ztt-folder-front') path.style.fill='url(#'+gradientId+')';
+        icon.append(path);
       }
       original.classList.add('ztt-original-folder');
       original.after(icon);
       let wasCollapsed = folder.collapsed;
       const sync = () => {
-        icon.setAttribute('state',original.getAttribute('state') || (folder.collapsed ? 'close' : 'open'));
+        icon.setAttribute('state',folder.collapsed ? 'close' : 'open');
         if (wasCollapsed && !folder.collapsed && !matchMedia('(prefers-reduced-motion:reduce)').matches) {
           for (const tab of folder.tabs.filter(t => !t.hasAttribute('zen-empty-tab') && !t.hidden)) {
             tab.animate([{opacity:0,translate:'0 -4px'},{opacity:1,translate:'0 0'}],
