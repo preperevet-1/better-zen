@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.12.3
+// @version        0.13.0
 // ==/UserScript==
 (() => {
   'use strict';
@@ -186,6 +186,33 @@
     });
     input.focus();
     input.select();
+  }
+  function groupSites(strip) {
+    const state = getState(strip);
+    restoreGroups(strip,state);
+    const sites = new Map();
+    for (const tab of tabsIn(strip)) {
+      if (manualTabs.has(tab)) continue;
+      const uri = tab.linkedBrowser?.currentURI;
+      if (!uri || !['http','https'].includes(uri.scheme)) continue;
+      let host;
+      try { host = Services.eTLD.getBaseDomain(uri); } catch { host = uri.host; }
+      const list = sites.get(host) || [];
+      list.push(tab); sites.set(host,list);
+    }
+    for (const [host,tabs] of sites) {
+      if (tabs.length < 3) continue;
+      const brands = {'google.com':'Google','youtube.com':'YouTube','github.com':'GitHub','chatgpt.com':'ChatGPT',
+        'claude.ai':'Claude','wikipedia.org':'Wikipedia','reddit.com':'Reddit','x.com':'X','figma.com':'Figma'};
+      const base = brands[host] || host.split('.')[0].replace(/(^|-)([a-z])/g,(_,dash,c)=>(dash?' ':'')+c.toUpperCase());
+      const name = uniqueName(strip,base,base);
+      // Avoid merging with a manually named group.
+      if (members(strip,name).some(tab => manualTabs.has(tab))) continue;
+      for (const tab of tabs) if (state.assignments.get(tab) !== name) {
+        state.assignments.set(tab,name);
+        saveGroup(tab,name);
+      }
+    }
   }
   function installSelectionMenu() {
     const menu = document.getElementById('tabContextMenu');
@@ -420,6 +447,19 @@
       return null;
     }
     function handle(event) {
+      const controller = gBrowser.tabContainer.tabDragAndDrop;
+      // Let Zen own its split preview, hover timer and final split drop.
+      if (controller._splitDropReady) return;
+      const transfer = event.dataTransfer;
+      const nativeTab = transfer?.types.includes('application/x-moz-tabbrowser-tab') &&
+        transfer.mozGetDataAt('application/x-moz-tabbrowser-tab',0);
+      const target = event.target.closest?.('.tabbrowser-tab');
+      if (nativeTab?._dragData && target && controller._dndSplitEnabled) {
+        const rect = target.getBoundingClientRect();
+        const ratio = (event.clientY-rect.top)/rect.height;
+        const threshold = controller._dndSplitThreshold/100;
+        if (ratio >= threshold && ratio <= 1-threshold) return;
+      }
       const dest = destination(event);
       if (!dest) { mark(null); return; }
       if (event.type !== 'drop' && dest.kind === 'tab' && drag?.tab?._dragData && dest.topic &&
@@ -722,7 +762,7 @@
       if (gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
       for (const [strip, s] of states) if (!strip.isConnected) { removeHeaders(s); unmountControl(s); states.delete(strip); }
       const strip = activeStrip();
-      if (strip) render(strip);
+      if (strip) { groupSites(strip); render(strip); }
     }, 100);
   }
   const style = node('style');
@@ -783,39 +823,10 @@
       background:var(--toolbarbutton-background-color-active,color-mix(in srgb,currentColor 20%,transparent)); }
     :is(#back-button,#forward-button,#reload-button) > .toolbarbutton-icon {
       position:relative; background:transparent!important; }
-    @media (prefers-reduced-motion:no-preference) {
-      :is(#back-button,#forward-button,#reload-button) > .toolbarbutton-icon {
-        transition:translate 140ms ease-out,rotate 170ms ease-out,scale 100ms ease-out!important; }
-      #back-button:not([disabled="true"]):active > .toolbarbutton-icon { translate:-2px 0; }
-      #forward-button:not([disabled="true"]):active > .toolbarbutton-icon { translate:2px 0; }
-      #reload-button:not([disabled="true"]):active > .toolbarbutton-icon { rotate:18deg; }
-      :is(#back-button,#forward-button,#reload-button):not([disabled="true"]):active > .toolbarbutton-icon { scale:.88; }
-    }
     :root[zen-single-toolbar="true"] .zen-essentials-container:not(:empty) {
       padding-bottom:4px!important; }
-    /* Native navigation: 31×29 hit area, 29×29 hover surface, 17×17 artwork. */
-    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button) {
-      box-sizing:border-box!important; position:relative; flex:none!important;
-      width:31px!important; min-width:31px!important; max-width:31px!important;
-      height:29px!important; min-height:29px!important; max-height:29px!important;
-      padding:0 1px!important; align-items:center; justify-content:center;
-      background:transparent!important; }
-    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button)::before {
-      content:''; position:absolute; inset:0 1px; pointer-events:none; }
-    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button):is(:hover,:focus-visible)::before {
-      background:var(--toolbarbutton-hover-background,var(--zen-toolbar-element-bg)); }
-    #zen-sidebar-foot-buttons :is(#zen-library-button,#zen-create-new-button)::before,
     :is(#back-button,#forward-button,#reload-button,#stop-button) > .toolbarbutton-icon {
       border-radius:11px!important; corner-shape:squircle; }
-    #zen-sidebar-foot-buttons #zen-create-new-button > .toolbarbutton-icon {
-      box-sizing:border-box!important; width:29px!important; height:29px!important;
-      padding:5px!important; scale:none!important; background:transparent!important; position:relative; }
-    #zen-sidebar-foot-buttons #zen-library-button .zen-library-sprite {
-      --zen-library-sprite-size:20px; width:20px!important; height:20px!important; scale:none!important; }
-    @media (prefers-reduced-motion:no-preference) {
-      #zen-sidebar-foot-buttons #zen-library-button .zen-library-sprite::before { animation-duration:360ms!important; }
-      #zen-sidebar-foot-buttons #zen-library-button:hover .zen-library-sprite::before { animation-duration:420ms!important; }
-    }
     #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover {
       background:transparent!important; border-color:transparent!important; box-shadow:none!important; }
     #zen-workspaces-button, #zen-workspaces-button[dont-show='true'] {
@@ -851,14 +862,6 @@
       left:9px!important; }
     :root[zen-sidebar-expanded="true"] zen-folder > .tab-group-label-container > :is(label,#tab-label-input) {
       padding-inline-start:36px!important; }
-    .ztt-original-folder { display:none!important; }
-    zen-folder .tab-group-folder-icon .ztt-folder-art {
-      width:24px!important; height:24px!important;
-      filter:none!important; transform:none!important;
-      color:light-dark(
-        oklch(from var(--zen-primary-color,#5393FF) min(l,.62) c h),
-        oklch(from var(--zen-primary-color,#5393FF) max(l,.65) c h))!important; }
-    zen-folder .ztt-folder-art :is(path,g,rect) { transition:none!important; }
     @media(prefers-reduced-motion:no-preference) {
       #urlbar #urlbar-input, #urlbar #urlbar-input::placeholder { transition:color 110ms ease-out!important; }
     }
@@ -1105,293 +1108,17 @@
     });
     abort.signal.addEventListener('abort',()=>{panel.hidePopover(); panel.remove();document.getElementById('zen-create-new-button')?.removeAttribute('open');},{once:true});
   }
-  // kubai-icons 0.3.1 (MIT), official Folder and animation runtime.
-var KubaiFolder = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // work/kubai-entry.js
-  var kubai_entry_exports = {};
-  __export(kubai_entry_exports, {
-    Folder: () => folder_default,
-    animate: () => I,
-    createIcon: () => m
-  });
-
-  // work/kubai-package/package/dist/color.js
-  var C = { color: { "--ki-c": "initial", "--ki-e": "initial", "--ki-w": "initial", "--ki-l": "initial" }, soft: { "--ki-c": "color-mix(in srgb,currentColor 90%,#fff)", "--ki-e": "color-mix(in srgb,currentColor 84%,#000)", "--ki-w": "color-mix(in srgb,currentColor 65%,#000)", "--ki-l": "72%" } };
-
-  // work/kubai-package/package/dist/icon.js
-  var $ = "0 -3 31 31";
-  var d = /__K__/g;
-  var y = (t, e, o, i, s2, n) => ({ name: t, markup: e, target: o, draw: i, tap: !!s2, ...n ? { tone: n } : {} });
-  var f = (t, e) => {
-    const o = e === "semantic" ? t.tone : e;
-    return o ? { "--ki-b": o } : {};
-  };
-  var r = /* @__PURE__ */ Symbol.for("kubai-icons.uid");
-  var v = typeof document > "u" ? "s" : "";
-  var x = () => (globalThis[r] = (globalThis[r] || 0) + 1, `ki${v}${globalThis[r].toString(36)}`);
-  var a = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-  var O = (t) => Object.entries(t).map(([e, o]) => `${e}:${o}`).join(";");
-  function S(t, { size: e = 24, color: o, variant: i, badgeColor: s2, title: n, className: l, id: p2 = x(), attrs: g3 = {} } = {}) {
-    const c = { ...C[i] || {}, ...o ? { color: o } : {}, ...f(t, s2) }, u2 = { xmlns: "http://www.w3.org/2000/svg", viewBox: $, width: e, height: e, fill: "none", overflow: "visible", class: ["kubai-icon", `kubai-icon-${t.name}`, l].filter(Boolean).join(" "), ...n ? { role: "img" } : { "aria-hidden": "true" }, ...Object.keys(c).length ? { style: O(c) } : {}, ...g3 };
-    return `<svg${Object.entries(u2).map(([b, m3]) => ` ${b}="${a(m3)}"`).join("")}>${n ? `<title>${a(n)}</title>` : ""}${t.markup.replace(d, p2)}</svg>`;
-  }
-
-  // work/kubai-package/package/dist/motion.js
-  function k(r2, e, i, n) {
-    const o = 3 * r2, c = 3 * (i - r2) - o, p2 = 1 - o - c, u2 = 3 * e, a2 = 3 * (n - e) - u2, m3 = 1 - u2 - a2, A2 = (t) => ((p2 * t + c) * t + o) * t, b = (t) => ((m3 * t + a2) * t + u2) * t, d2 = (t) => (3 * p2 * t + 2 * c) * t + o;
-    return (t) => {
-      if (t <= 0) return 0;
-      if (t >= 1) return 1;
-      let f2 = t;
-      for (let l = 0; l < 8; l++) {
-        const x2 = A2(f2) - t;
-        if (Math.abs(x2) < 1e-5) break;
-        const y3 = d2(f2);
-        if (Math.abs(y3) < 1e-6) break;
-        f2 -= x2 / y3;
-      }
-      return b(f2);
-    };
-  }
-  var E = k(0.22, 1, 0.36, 1);
-  var S2 = 460;
-  function h(r2, e, i) {
-    if (typeof e == "number") return typeof r2 == "number" ? r2 + (e - r2) * i : e;
-    if (Array.isArray(e)) return e.map((n, o) => h(r2 ? r2[o] : n, n, i));
-    if (e && typeof e == "object") {
-      const n = {};
-      for (const o in e) n[o] = h(r2 ? r2[o] : void 0, e[o], i);
-      return n;
-    }
-    return e;
-  }
-  var g = /* @__PURE__ */ Symbol.for("kubai-icons.phase");
-
-  // work/kubai-package/package/dist/runtime.js
-  var E2 = false;
-  try {
-    E2 = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  } catch {
-  }
-  var F = typeof requestAnimationFrame == "function" ? requestAnimationFrame : (n) => setTimeout(() => n(Date.now()), 16);
-  var M = typeof cancelAnimationFrame == "function" ? cancelAnimationFrame : clearTimeout;
-  var B = () => typeof performance < "u" ? performance.now() : Date.now();
-  function I(n, o, { state: h2 = {} } = {}) {
-    const l = {};
-    for (const t of n.querySelectorAll("[data-n]")) l[t.getAttribute("data-n")] = t;
-    const i = [];
-    for (const t of n.querySelectorAll("[mask]")) {
-      const r2 = (t.getAttribute("mask").match(/url\(#([^)]+)\)/) || [])[1], s2 = r2 && n.querySelector(`mask[id="${r2}"] path`);
-      s2 && s2.getAttribute("d") === t.getAttribute("d") && i.push([t, s2]);
-    }
-    const b = [];
-    for (const t of n.querySelectorAll("[data-under]")) {
-      const r2 = n.querySelector(`[data-over="${t.getAttribute("data-under")}"]`);
-      r2 && b.push([r2, t]);
-    }
-    let p2 = false, a2 = { ...h2 }, y3 = 0, g3 = false, A2 = o.target(false, a2);
-    const u2 = n.style, v2 = u2 ? u2.willChange : "", d2 = (t) => {
-      u2 && (u2.willChange = t ? "transform" : v2);
-    }, e = (t) => {
-      globalThis[g] = t, o.draw(A2, l, {}), globalThis[g] = void 0;
-      for (const [r2, s2] of i) {
-        const f2 = r2.getAttribute("d");
-        f2 && s2.getAttribute("d") !== f2 && s2.setAttribute("d", f2);
-      }
-      for (const [r2, s2] of b) for (const f2 of ["d", "transform"]) {
-        const m3 = r2.getAttribute(f2);
-        m3 !== s2.getAttribute(f2) && (m3 === null ? s2.removeAttribute(f2) : s2.setAttribute(f2, m3));
-      }
-    }, c = (t) => {
-      const r2 = o.target(p2, a2);
-      if (M(y3), t || E2) {
-        A2 = r2, e(), d2(false);
-        return;
-      }
-      const s2 = A2, f2 = B();
-      d2(true);
-      const m3 = (T2) => {
-        if (g3) return;
-        const k3 = Math.min(1, ((typeof T2 == "number" ? T2 : B()) - f2) / S2), S3 = E(k3);
-        A2 = h(s2, r2, S3), e({ out: !p2, e: S3 }), k3 < 1 ? y3 = F(m3) : d2(false);
-      };
-      y3 = F(m3);
-    };
-    return Object.keys(a2).length && c(true), { hover(t, r2) {
-      !!t !== p2 && (p2 = !!t, c(r2));
-    }, state(t, r2) {
-      a2 = { ...a2, ...t }, c(r2);
-    }, get hovered() {
-      return p2;
-    }, get active() {
-      return !!a2.active;
-    }, svg: n, destroy() {
-      g3 = true, M(y3), d2(false);
-    } };
-  }
-  function L(n, o, h2, l) {
-    let i = 0;
-    const b = (e) => {
-      (!e.pointerType || e.pointerType === "mouse") && (i++, o.hover(true));
-    }, p2 = (e) => {
-      (!e.pointerType || e.pointerType === "mouse") && (i = Math.max(0, i - 1), i || o.hover(false));
-    };
-    let a2 = false;
-    const u2 = { pointerenter: b, pointerleave: p2, focusin: (e) => {
-      let c = true;
-      try {
-        c = e.target.matches(":focus-visible");
-      } catch {
-      }
-      !c || a2 || (a2 = true, i++, o.hover(true));
-    }, focusout: () => {
-      a2 && (a2 = false, i = Math.max(0, i - 1), i || o.hover(false));
-    }, click: (e) => {
-      if (h2.tap) {
-        const c = !o.active;
-        l ? l(c) : o.state({ active: c });
-        return;
-      }
-      e.pointerType && e.pointerType !== "mouse" && (o.hover(true), setTimeout(() => o.hover(false), S2 + 240));
-    } }, v2 = () => {
-      for (const e in u2) n.removeEventListener(e, d2);
-    }, d2 = (e) => {
-      o.svg && !o.svg.isConnected ? v2() : u2[e.type](e);
-    };
-    for (const e in u2) n.addEventListener(e, d2);
-    return v2;
-  }
-
-  // work/kubai-package/package/dist/api.js
-  function m(r2, i = {}) {
-    const { trigger: o = "hover", active: s2, ...t } = i, n = document.createElement("template");
-    n.innerHTML = S(r2, t);
-    const e = n.content.firstElementChild;
-    if (o === "none") return e;
-    const a2 = I(e, r2, { state: s2 ? { active: true } : {} });
-    e.kubai = a2;
-    let c = o === "parent" ? null : L(e, a2, r2);
-    c || queueMicrotask(() => {
-      c = L(e.closest("[data-kubai-trigger]") || e.parentElement || e, a2, r2);
-    });
-    const u2 = a2.destroy;
-    return a2.destroy = () => {
-      c?.(), u2();
-    }, e;
-  }
-
-  // work/kubai-package/package/dist/kit.js
-  var C2 = 2.2;
-  var s = (t) => +t.toFixed(3);
-  var T = 'class="ol" data-t="stroke:#5393FF"';
-  var A = 'class="ln" data-t="stroke:#D3E2FC"';
-  var k2 = (t, o, n, e) => [[t, o], [t + n, o], [t + n, o + e], [t, o + e]];
-  function u(t, o, n) {
-    const e = t.length;
-    let $2 = "";
-    for (let r2 = 0; r2 < e; r2++) {
-      const a2 = t[r2], M2 = t[(r2 + e - 1) % e], c = t[(r2 + 1) % e], i = Array.isArray(o) ? o[r2] : o, p2 = Math.hypot(M2[0] - a2[0], M2[1] - a2[1]) || 1e-6, h2 = Math.hypot(c[0] - a2[0], c[1] - a2[1]) || 1e-6, f2 = n ? 1 : 0.5, l = Math.min(i, p2 * f2) / p2, F2 = Math.min(i, h2 * f2) / h2;
-      $2 += (r2 ? "L" : "M") + s(a2[0] + (M2[0] - a2[0]) * l) + " " + s(a2[1] + (M2[1] - a2[1]) * l) + "Q" + s(a2[0]) + " " + s(a2[1]) + " " + s(a2[0] + (c[0] - a2[0]) * F2) + " " + s(a2[1] + (c[1] - a2[1]) * F2);
-    }
-    return $2 + "Z";
-  }
-  var m2 = (t, o, n, e, $2) => u(k2(t, o, n, e), $2);
-  var y2 = (t, o) => {
-    if (t) for (const n in o) t.setAttribute(n, o[n]);
-  };
-  function nt(t) {
-    return t;
-  }
-
-  // work/kubai-package/package/dist/defs/folder.js
-  var g2 = [C2, 1.4, 1.4, C2, C2, C2];
-  var p = nt({ name: "folder", category: "files", tags: ["directory", "open", "files"], variants: ["plus", "minus", "check", "x", "alert", "info", "up", "down", "right", "clock", "star", "heart", "lock", "search", "sync", "cog", "sparkle", "bolt"], svg: (t) => `
-    <g filter="${t.sh}"><path data-n="back" fill="${t.lo(21)}"/></g>
-    <path data-n="backO" ${T}/>
-    <g data-n="file"><path d="${m2(0, 0, 17, 9, 1)}" fill="#fff"/><path d="M5.5 2.3H11.5" ${A} stroke-width="1"/></g>
-    <g filter="${t.hi}"><path data-n="front" fill="${t.up(18)}"/></g>
-    <path data-n="frontO" ${T}/>`, target: (t) => ({ back: t ? [[4, 3], [11.2, 3], [14.2, 6], [27, 6], [27.6, 23], [4.6, 23]] : [[4, 2], [11.2, 2], [14.2, 5], [27, 5], [27, 23], [4, 23]], fx: t ? 7.9 : 7, front: t ? [[6.8, 13], [29.3, 13], [27.6, 23], [5.4, 23]] : [[4, 5], [27, 5], [27, 23], [4, 23]], fr: t ? 1.8 : C2 }), draw(t, a2) {
-    const o = u(t.back, g2), n = u(t.front, t.fr);
-    y2(a2.back, { d: o }), y2(a2.backO, { d: o }), y2(a2.file, { transform: `translate(${s(t.fx)} 9)` }), y2(a2.front, { d: n }), y2(a2.frontO, { d: n });
-  } });
-
-  // work/kubai-package/package/dist/icons/folder.js
-  var folder_default = /* @__PURE__ */ y("folder", '<defs><linearGradient id="loS-__K__" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 62.9%,#fff)"/><stop offset="1" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 74.7%,#fff)"/></linearGradient><linearGradient id="upS-__K__" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 29.6%,#fff)"/><stop offset="1" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 47.9%,#fff)"/></linearGradient><linearGradient id="lo-__K__-943" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 62.9%,#fff)"/><stop offset="0.943" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 73.2%,#fff)"/><stop offset="0.943" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 90.7%,#000)"/><stop offset="1" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 60.3%,#fff)"/></linearGradient><linearGradient id="up-__K__-933" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 29.6%,#fff)"/><stop offset="0.933" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 45.1%,#fff)"/><stop offset="0.933" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 68.6%,#fff)"/><stop offset="1" style="stop-color:color-mix(in srgb,var(--ki-c,currentColor) 60.3%,#fff)"/></linearGradient><filter id="sh-__K__" x="-40%" y="-40%" width="180%" height="190%" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="2"/><feOffset dy="2" result="o"/><feFlood style="flood-color:color-mix(in srgb,var(--ki-c,currentColor) 67.8%,#fff)" flood-opacity="0.21"/><feComposite in2="o" operator="in"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter><filter id="hi-__K__" x="-10%" y="-10%" width="120%" height="130%" color-interpolation-filters="sRGB"><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="a"/><feOffset in="a" dy="0.7"/><feGaussianBlur stdDeviation="0.35"/><feComposite in2="a" operator="arithmetic" k2="-1" k3="1"/><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0"/><feBlend in2="SourceGraphic" mode="overlay"/></filter><mask id="ol-__K__-0" maskUnits="userSpaceOnUse" x="-40" y="-40" width="111" height="109"><rect x="-40" y="-40" width="111" height="109" fill="#fff"/><path d="M4 4.2Q4 2 6.2 2L9.8 2Q11.2 2 12.19 2.99L13.21 4.01Q14.2 5 15.6 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" fill="#000"/></mask><mask id="ol-__K__-1" maskUnits="userSpaceOnUse" x="-40" y="-40" width="111" height="109"><rect x="-40" y="-40" width="111" height="109" fill="#fff"/><path d="M4 7.2Q4 5 6.2 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" fill="#000"/></mask></defs><path d="M4 4.2Q4 2 6.2 2L9.8 2Q11.2 2 12.19 2.99L13.21 4.01Q14.2 5 15.6 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" fill="none" stroke-width="1" data-under="0" stroke="url(#lo-__K__-943)"/><g filter="url(#sh-__K__)"><path data-n="back" fill="url(#lo-__K__-943)" d="M4 4.2Q4 2 6.2 2L9.8 2Q11.2 2 12.19 2.99L13.21 4.01Q14.2 5 15.6 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" data-over="0"/></g><path data-n="backO" d="M4 4.2Q4 2 6.2 2L9.8 2Q11.2 2 12.19 2.99L13.21 4.01Q14.2 5 15.6 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" mask="url(#ol-__K__-0)" fill="none" stroke-width="2" style="stroke:var(--ki-e,var(--ki-c,currentColor))"/><g data-n="file" transform="translate(7 9)"><path d="M0 1Q0 0 1 0L16 0Q17 0 17 1L17 8Q17 9 16 9L1 9Q0 9 0 8Z" fill="#fff"/><path d="M5.5 2.3H11.5" stroke-width="1.6" fill="none" stroke-linecap="round" style="stroke:color-mix(in srgb,var(--ki-c,currentColor) 26.2%,#fff)"/></g><path d="M4 7.2Q4 5 6.2 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" fill="none" stroke-width="1" data-under="1" stroke="url(#up-__K__-933)"/><g filter="url(#hi-__K__)"><path data-n="front" fill="url(#up-__K__-933)" d="M4 7.2Q4 5 6.2 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" data-over="1"/></g><path data-n="frontO" d="M4 7.2Q4 5 6.2 5L24.8 5Q27 5 27 7.2L27 20.8Q27 23 24.8 23L6.2 23Q4 23 4 20.8Z" mask="url(#ol-__K__-1)" fill="none" stroke-width="2" style="stroke:var(--ki-e,var(--ki-c,currentColor))"/>', p.target, p.draw, 0);
-  return __toCommonJS(kubai_entry_exports);
-})();
-  function installFolderMotion() {
-    const entries = new Map();
-    const attach = folder => {
-      if (entries.has(folder)) return;
-      const original = folder.icon?.querySelector('svg');
-      if (!original) return;
-      const icon = KubaiFolder.createIcon(KubaiFolder.Folder, {
-        size:24, color:'var(--zen-primary-color,#5393FF)', trigger:'none',
-        className:'ztt-folder-art'
-      });
-      const motion = KubaiFolder.animate(icon,KubaiFolder.Folder);
-      motion.hover(!folder.collapsed,true);
-      original.classList.add('ztt-original-folder');
-      original.after(icon);
-      let wasCollapsed = folder.collapsed;
-      const sync = () => {
-        motion.hover(!folder.collapsed);
-        if (wasCollapsed && !folder.collapsed && !matchMedia('(prefers-reduced-motion:reduce)').matches) {
-          for (const tab of folder.tabs.filter(t => !t.hasAttribute('zen-empty-tab') && !t.hidden)) {
-            tab.animate([{opacity:0,translate:'0 -4px'},{opacity:1,translate:'0 0'}],
-              {duration:150,easing:'ease-out'});
-          }
-        }
-        wasCollapsed = folder.collapsed;
-      };
-      const changes = new MutationObserver(sync);
-      changes.observe(original,{attributes:true,attributeFilter:['state']});
-      changes.observe(folder,{attributes:true,attributeFilter:['collapsed']});
-      entries.set(folder,{icon,original,changes,motion});sync();
-    };
-    const scan = () => {
-      for (const [folder,entry] of entries) if (!folder.isConnected) {
-        entry.changes.disconnect(); entry.motion.destroy(); entries.delete(folder);
-      }
-      document.querySelectorAll('zen-folder').forEach(attach);
-    };
-    const changes = new MutationObserver(scan);
-    changes.observe(gBrowser.tabContainer,{childList:true,subtree:true});
-    scan();
-    abort.signal.addEventListener('abort',()=>{
-      changes.disconnect();
-      for (const entry of entries.values()) {
-        entry.changes.disconnect();entry.motion.destroy();entry.icon.remove();entry.original.classList.remove('ztt-original-folder');
-      }
-    },{once:true});
-  }
   function init() {
     if (destroyed) return;
     if (!window.gBrowser || !window.gZenWorkspaces) { startupTimer = setTimeout(init, 250); return; }
     document.documentElement.append(style);
     installCreateMenu();
-    installFolderMotion();
     installInsertionHook();
     installDrag();
     installSelectionMenu();
+    const progress = {onLocationChange:() => schedule()};
+    gBrowser.addTabsProgressListener(progress);
+    abort.signal.addEventListener('abort',()=>gBrowser.removeTabsProgressListener(progress),{once:true});
     for (const event of ['SSTabRestored','SSTabRestoring','TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
       gBrowser.tabContainer.addEventListener(event, schedule, { signal:abort.signal });
     }
