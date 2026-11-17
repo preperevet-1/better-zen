@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.12
+// @version        0.14.13
 // ==/UserScript==
 (() => {
   'use strict';
@@ -878,6 +878,10 @@
     }
     @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs .tab-audio-button { transition:none!important; } }
     #zen-media-controls-toolbar {
+      position:fixed!important; left:var(--ztt-player-left)!important; right:auto!important;
+      bottom:var(--ztt-player-bottom)!important; width:var(--ztt-player-width)!important;
+      box-sizing:border-box!important; margin:0!important; padding:0!important; z-index:3;
+      .zen-media-card { margin-inline:0!important; width:100%!important; }
       --zia-media-ring-size:30px; --zia-media-art-size:26px; --zia-squircle-grow:1; --zia-squircle:squircle;
       .zen-media-card {
         border-radius:22px!important; corner-shape:squircle!important; padding:9px 10px!important; box-sizing:border-box;
@@ -969,10 +973,34 @@
       :is(.zen-media-current-time,.zen-media-duration) { display:none!important; }
       .zen-media-progress-hbox { width:100%!important; min-width:0; margin-inline:0!important; padding-inline:0!important; box-sizing:border-box; }
       .zen-media-progress-bar { flex:1 1 0%!important; width:100%!important; min-width:0!important; margin-inline:0!important; }
-      .zen-media-card:not(:hover):not(:has(:focus-visible)) {
-        & :is(.zen-media-progress-hbox,.zen-media-pip-button,.zen-media-close-button,.zen-media-previoustrack-button,.zen-media-playpause-button,.zen-media-nexttrack-button) { display:none!important; }
-        & .zen-media-main-vbox { grid-template-rows:auto 0 0; row-gap:0; }
+      --zia-media-art-size:18px;
+      .zen-media-card {
+        box-sizing:border-box!important; height:auto!important; min-height:0!important;
+        --progress-row:0px; --buttons-row:0px; --controls-opacity:0;
+        &:is(:hover,:focus-within) { --progress-row:12px; --buttons-row:26px; --controls-opacity:1; }
       }
+      .zen-media-main-vbox {
+        grid-template-rows:auto var(--progress-row) var(--buttons-row)!important;
+        row-gap:0!important; align-content:start!important;
+        transition:grid-template-rows 155ms cubic-bezier(.2,.8,.2,1)!important;
+      }
+      .zen-media-progress-hbox {
+        align-self:center; height:100%!important; min-height:0!important; margin:0!important;
+        display:flex!important; align-items:center!important; overflow:hidden;
+      }
+      :is(.zen-media-progress-hbox,.zen-media-pip-button,.zen-media-close-button,.zen-media-previoustrack-button,.zen-media-playpause-button,.zen-media-nexttrack-button) {
+        opacity:var(--controls-opacity)!important; transition:opacity 140ms ease!important;
+      }
+      .zen-media-card:not(:hover):not(:focus-within) :is(.zen-media-progress-hbox,.zen-media-pip-button,.zen-media-close-button,.zen-media-previoustrack-button,.zen-media-playpause-button,.zen-media-nexttrack-button) {
+        pointer-events:none!important; visibility:hidden;
+      }
+      :is(.zen-media-mute-button,.zen-media-pip-button,.zen-media-close-button,.zen-media-previoustrack-button,.zen-media-playpause-button,.zen-media-nexttrack-button) {
+        justify-self:center; align-self:center; box-sizing:border-box!important;
+        width:26px!important; height:26px!important; min-width:0!important; min-height:0!important;
+        padding:0!important; margin:0!important; justify-content:center!important; align-items:center!important;
+        & > .toolbarbutton-icon { width:16px!important; height:16px!important; padding:0!important; object-fit:contain; }
+      }
+      @media(prefers-reduced-motion:reduce) { .zen-media-main-vbox, .zen-media-main-vbox * { transition:none!important; } }
       .toolbarbutton-1:is(:hover,:active) > .toolbarbutton-icon { background-color:transparent!important; box-shadow:none!important; }
       .zen-media-notes { display:none!important; }
     }
@@ -1262,13 +1290,35 @@
       }
       panel.focus({preventScroll:true});
     }
+    // Use the same viewport coordinates for the card and the create menu.
+    const footer=document.getElementById('zen-sidebar-foot-buttons');
+    const plusAnchor=document.getElementById('zen-create-new-button');
+    function footerGeometry() {
+      const anchor=document.getElementById('zen-create-new-button');
+      const bar=anchor.closest('#zen-sidebar-foot-buttons').getBoundingClientRect(), button=anchor.getBoundingClientRect();
+      const width=Math.min(224,Math.max(1,bar.width-8));
+      const left=Math.max(bar.left+4,Math.min(button.right-width,bar.right-4-width));
+      return {button,width,left};
+    }
+    if (footer && plusAnchor) {
+      const alignPlayer=()=>{
+        if (!document.getElementById('zen-create-new-button')?.closest('#zen-sidebar-foot-buttons')) return;
+        const {button,width,left}=footerGeometry();
+        const root=document.documentElement.style;
+        root.setProperty('--ztt-player-width',width+'px');
+        root.setProperty('--ztt-player-left',left+'px');
+        root.setProperty('--ztt-player-bottom',(window.innerHeight-button.top+12)+'px');
+      };
+      const resize=new ResizeObserver(alignPlayer);
+      resize.observe(footer); resize.observe(plusAnchor);
+      window.addEventListener('resize',alignPlayer,{signal:abort.signal});
+      abort.signal.addEventListener('abort',()=>resize.disconnect(),{once:true});
+      alignPlayer();
+    }
     function positionMenu() {
       const plus = document.getElementById('zen-create-new-button');
       if (!plus || !panel.matches(':popover-open')) return;
-      const bar = plus.closest('#zen-sidebar-foot-buttons').getBoundingClientRect();
-      const button = plus.getBoundingClientRect();
-      const width = Math.min(224,Math.max(1,bar.width - 8));
-      const left = Math.max(bar.left+4,Math.min(button.right-width,bar.right-4-width));
+      const {button,width,left}=footerGeometry();
       panel.style.width = width+'px';
       panel.style.left = left+'px';
       panel.style.transformOrigin = (button.left + button.width/2 - left)+'px bottom';
