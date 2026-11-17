@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.14
+// @version        0.14.15
 // ==/UserScript==
 (() => {
   'use strict';
@@ -868,7 +868,7 @@
       inline-size:0!important; margin-inline:0!important; opacity:0; visibility:hidden;
       transition:inline-size 160ms ease,margin-inline-end 160ms ease,opacity 140ms ease,visibility 0s 160ms;
     }
-    #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]):is([soundplaying],[muted],[activemedia-blocked]) .tab-audio-button {
+    #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]):is([soundplaying]:not([muted]),[ztt-muted-playing],[activemedia-blocked]) .tab-audio-button {
       inline-size:var(--tab-content-button-size,16px)!important; margin-inline-end:var(--tab-icon-margin-inline-end,6px)!important;
       opacity:1; visibility:visible; transition-delay:0s;
     }
@@ -879,12 +879,12 @@
     @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs .tab-audio-button { transition:none!important; } }
     #zen-media-controls-toolbar {
       position:fixed!important; left:var(--ztt-player-left)!important; right:auto!important;
-      bottom:var(--ztt-player-bottom)!important; width:var(--ztt-player-width)!important;
+      bottom:var(--ztt-player-bottom)!important; width:var(--ztt-player-width)!important; max-width:none!important;
       box-sizing:border-box!important; margin:0!important; padding:0!important; z-index:3;
-      .zen-media-card { margin-inline:0!important; width:100%!important; }
-      --zia-media-ring-size:30px; --zia-media-art-size:26px; --zia-squircle-grow:1; --zia-squircle:squircle;
+      .zen-media-card { margin-inline:0!important; width:100%!important; max-width:none!important; }
+      --zia-media-ring-size:26px; --zia-media-art-size:26px; --zia-squircle-grow:1; --zia-squircle:squircle;
       .zen-media-card {
-        border-radius:22px!important; corner-shape:squircle!important; padding:9px 10px!important; box-sizing:border-box;
+        border-radius:22px!important; corner-shape:squircle!important; padding:10px!important; box-sizing:border-box;
         background:light-dark(#fffefe,#2c2b30)!important; color:light-dark(#171619,#f5f3f7); box-shadow:0 2px 9px rgb(0 0 0 / .12),0 0 1px rgb(0 0 0 / .15)!important;
       }
   .zen-media-main-vbox {
@@ -892,7 +892,7 @@
     align-content: center;
     display: grid !important;
 
-    grid-template-columns:30px minmax(0,1fr) repeat(3,auto) minmax(0,1fr) 30px;
+    grid-template-columns:26px minmax(0,1fr) repeat(3,auto) minmax(0,1fr) 26px;
     grid-template-rows: auto auto auto;
     column-gap: 0;
     row-gap: 0;
@@ -973,11 +973,11 @@
       :is(.zen-media-current-time,.zen-media-duration) { display:none!important; }
       .zen-media-progress-hbox { width:100%!important; min-width:0; margin-inline:0!important; padding-inline:0!important; box-sizing:border-box; }
       .zen-media-progress-bar { flex:1 1 0%!important; width:100%!important; min-width:0!important; margin-inline:0!important; }
-      --zia-media-art-size:18px;
+      --zia-media-art-size:16px;
       .zen-media-card {
         box-sizing:border-box!important; height:auto!important; min-height:0!important;
         --progress-row:0px; --buttons-row:0px; --controls-opacity:0;
-        &:is(:hover,:focus-within) { --progress-row:12px; --buttons-row:26px; --controls-opacity:1; }
+        &:is(:hover,:focus-within) { --progress-row:20px; --buttons-row:26px; --controls-opacity:1; }
       }
       .zen-media-main-vbox {
         grid-template-rows:auto var(--progress-row) var(--buttons-row)!important;
@@ -1002,6 +1002,12 @@
       }
       @media(prefers-reduced-motion:reduce) { .zen-media-main-vbox, .zen-media-main-vbox * { transition:none!important; } }
       .toolbarbutton-1:is(:hover,:active) > .toolbarbutton-icon { background-color:transparent!important; box-shadow:none!important; }
+      .zen-media-playpause-button { margin-inline:3px!important; }
+      :is(.zen-media-nexttrack-button,.zen-media-previoustrack-button):is(:disabled,[disabled],[aria-disabled="true"]) { opacity:calc(var(--controls-opacity) * .32)!important; }
+      .zen-media-pip-button > .toolbarbutton-icon {
+        list-style-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2.5' width='14' height='11' rx='1.5' fill='none' stroke='context-fill'/%3E%3Crect x='8' y='7' width='5.5' height='5' rx='.7' fill='context-fill'/%3E%3C/svg%3E")!important;
+        -moz-context-properties:fill; fill:currentColor; border-radius:0!important;
+      }
       .zen-media-notes { display:none!important; }
     }
     :root:has(#ztt-create-panel:popover-open) #zen-media-controls-toolbar { visibility:hidden!important; pointer-events:none!important; }
@@ -1303,7 +1309,9 @@
     if (footer && plusAnchor) {
       const alignPlayer=()=>{
         if (!document.getElementById('zen-create-new-button')?.closest('#zen-sidebar-foot-buttons')) return;
-        const {button,width,left}=footerGeometry();
+        const {button}=footerGeometry();
+        const bar=footer.getBoundingClientRect();
+        const width=Math.max(1,bar.width-8), left=bar.left+4;
         const root=document.documentElement.style;
         root.setProperty('--ztt-player-width',width+'px');
         root.setProperty('--ztt-player-left',left+'px');
@@ -1318,7 +1326,9 @@
     function positionMenu() {
       const plus = document.getElementById('zen-create-new-button');
       if (!plus || !panel.matches(':popover-open')) return;
-      const {button,width,left}=footerGeometry();
+      const {button}=footerGeometry();
+        const bar=footer.getBoundingClientRect();
+        const width=Math.max(1,bar.width-8), left=bar.left+4;
       panel.style.width = width+'px';
       panel.style.left = left+'px';
       panel.style.transformOrigin = (button.left + button.width/2 - left)+'px bottom';
@@ -1394,6 +1404,31 @@
       if (manager.pinHasChangedUrl === suppressReset) manager.pinHasChangedUrl = original;
     },{once:true});
   }
+  function installMutedIndicators() {
+    const watched = new Map();
+    function release(tab) {
+      watched.get(tab)?.abort();
+      watched.delete(tab);
+      tab.removeAttribute('ztt-muted-playing');
+    }
+    function sync(tab) {
+      if (!tab.hasAttribute('muted')) { release(tab); return; }
+      const controller = tab.linkedBrowser?.browsingContext?.mediaController;
+      if (!controller || watched.has(tab)) return;
+      const listener = new AbortController();
+      watched.set(tab, listener);
+      const update = () => tab.toggleAttribute('ztt-muted-playing', controller.isPlaying);
+      for (const event of ['playbackstatechange','activated','deactivated']) {
+        controller.addEventListener(event, update, {signal:listener.signal});
+      }
+      update();
+    }
+    const tabs = gBrowser.tabContainer;
+    tabs.addEventListener('TabAttrModified', event => sync(event.target), {signal:abort.signal});
+    tabs.addEventListener('TabClose', event => release(event.target), {signal:abort.signal});
+    abort.signal.addEventListener('abort', () => { for (const tab of watched.keys()) release(tab); }, {once:true});
+    for (const tab of gBrowser.tabs) sync(tab);
+  }
   function init() {
     if (destroyed) return;
     if (!window.gBrowser || !window.gZenWorkspaces) { startupTimer = setTimeout(init, 250); return; }
@@ -1402,6 +1437,7 @@
     Services.prefs.setBoolPref('zen.splitView.enable-drag-over-split',false);
     Services.prefs.setBoolPref('zen.pinned-tab-manager.restore-pinned-tabs-to-pinned-url',true);
     gBrowser.tabContainer.tabDragAndDrop._clearDragOverSplit?.();
+    installMutedIndicators();
     installPinnedBehavior();
     installCreateMenu();
     installInsertionHook();
