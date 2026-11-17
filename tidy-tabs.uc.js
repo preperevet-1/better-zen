@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.7
+// @version        0.14.8
 // ==/UserScript==
 (() => {
   'use strict';
@@ -360,20 +360,21 @@
       const a=active, {strip,rows,y,source,pins}=a;
       const separator=getState(strip).separator;
       const boundary=a.boundary;
-      // Keep the last half-row and the gap below an expanded folder inside
-      // that folder, rather than resolving them to the next folder's header.
-      if (source.kind==='tab') for (const header of rows) {
-        if (header.kind!=='folder' || header.item.collapsed) continue;
-        const children=rows.filter(r=>r.parent===header.item && !a.moving.has(r));
-        const last=children.at(-1);
-        if (!last) continue;
-        const next=rows.find(r=>r.top>=last.bottom && r!==last && r.kind!=='separator');
-        const end=Math.min(last.bottom+14,next?next.top+Math.min(6,next.height*.2):boundary+8);
-        if (y>=last.top+last.height/2 && y<=end) {
-          return {kind:'folder',folder:header.item,container:header.item.groupContainer,anchor:last.item,after:true};
+      const divider=rows.find(row=>row.kind==='separator');
+      const pinnedRows=rows.filter(row=>row.container===pins && row.kind!=='separator');
+      const emptyPinZone=source.kind==='group' && !pinnedRows.length;
+      const split=emptyPinZone ? Math.max(boundary+(divider?.height||0),a.top+18) : boundary;
+      const inPins=pins && y<split;
+      if (inPins && source.kind==='tab') {
+        const last=pinnedRows.at(-1);
+        if (last?.kind==='folder') {
+          const end=rows.filter(row=>row.item===last.item || last.item.contains(row.item));
+          const bottom=Math.max(...end.map(row=>row.bottom));
+          if (y>=bottom-6) return {kind:'pins',container:pins,anchor:last.item,after:true};
         }
+        const child=rows.find(row=>row.parent && row.kind==='tab' && !a.moving.has(row) && y>=row.top && y<row.bottom);
+        if (child) return {kind:'folder',container:child.container,folder:child.parent,anchor:child.item,after:y>=child.top+child.height/2};
       }
-      const inPins=pins && y<boundary;
       const available=rows.filter(r=>r.kind!=='separator' && !a.moving.has(r) && (inPins ? r.container!==strip : r.container===strip));
       if (inPins) {
         // Folder labels are explicit destinations for tabs, but entire folders
@@ -572,7 +573,7 @@
       event.preventDefault();
       const valid=inside(event);
       event.dataTransfer.dropEffect=valid?'move':'none';
-      active.y=Math.max(active.top,Math.min(active.bottom,event.clientY));
+      active.y=event.clientY;
       if (event.type!=='drop') {
         previewFolder(valid?target().folder:null);
         if (!frame) frame=requestAnimationFrame(draw); return;
@@ -598,7 +599,7 @@
     listen('drag',event=>{
       if (!active) return;
       event.stopImmediatePropagation();
-      if (event.clientX||event.clientY) { active.y=Math.max(active.top,Math.min(active.bottom,event.clientY)); if (!frame) frame=requestAnimationFrame(draw); }
+      if (event.clientX||event.clientY) { active.y=event.clientY; if (!frame) frame=requestAnimationFrame(draw); }
     });
     listen('dragleave',event=>{if(active)event.stopImmediatePropagation();});
     listen('dragend',event=>{
@@ -835,6 +836,11 @@
   }
   const style = node('style');
   style.textContent = `
+    #browser #tabbrowser-tabbox { box-shadow:0 0 5px rgb(0 0 0 / .065); }
+    @media (prefers-reduced-motion:no-preference) {
+      zen-folder:not([collapsed]) > .tab-group-container { animation:ztt-folder-open 135ms ease-out; }
+      @keyframes ztt-folder-open { from { opacity:.3; clip-path:inset(0 0 90% 0); } to { opacity:1; clip-path:inset(0); } }
+    }
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
       transform:translateY(var(--ztt-drag-y,0px))!important; transform-origin:center!important; position:relative!important; }
