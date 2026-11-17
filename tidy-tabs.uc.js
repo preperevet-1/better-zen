@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.5
+// @version        0.14.6
 // ==/UserScript==
 (() => {
   'use strict';
@@ -270,6 +270,7 @@
     let active = null, frame = 0, finishing = false, folderPressed = false;
     let hoverTimer=0, geometryTimer=0, hoverFolder=null;
     const openedFolders=new Set();
+    const closeTimers=new Map();
     const originalFolderPopup = gZenFolders.openTabsPopup;
     const guardedFolderPopup = function(...args) {
       if (folderPressed || sidebarDragging || finishing) return;
@@ -335,6 +336,8 @@
     function cancelHoverTimers() {
       clearTimeout(hoverTimer); clearTimeout(geometryTimer);
       hoverTimer=0; geometryTimer=0; hoverFolder=null;
+      for (const timer of closeTimers.values()) clearTimeout(timer);
+      closeTimers.clear();
     }
     function closePreviewFolders(keep=null) {
       cancelHoverTimers();
@@ -362,27 +365,44 @@
       a.boundary=getState(a.strip).separator?.getBoundingClientRect().top??a.strip.getBoundingClientRect().top;
       draw();
     }
+    function changePreview(folder,collapsed) {
+      if (!active || !folder.isConnected) return;
+      const before=new Map(active.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
+      folder.collapsed=collapsed;
+      // Complete native height motion before taking the new row snapshot.
+      // Neighbors then animate once from their previous screen positions.
+      for (const animation of folder.getAnimations({subtree:true})) {
+        try { animation.finish(); } catch { animation.cancel(); }
+      }
+      refreshRows();
+      if (!active || matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+      for (const [el,top] of before) if (el.isConnected && !el.hasAttribute('ztt-lift')) {
+        const delta=top-el.getBoundingClientRect().top;
+        if (delta) el.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],{duration:140,easing:'cubic-bezier(.2,.8,.2,1)'});
+      }
+    }
     function previewFolder(folder) {
       if (!active || active.source.kind!=='tab') return;
+      for (const opened of openedFolders) {
+        if (opened===folder || opened.contains(folder)) {
+          clearTimeout(closeTimers.get(opened)); closeTimers.delete(opened);
+        } else if (!closeTimers.has(opened)) {
+          const session=active;
+          closeTimers.set(opened,setTimeout(()=>{
+            closeTimers.delete(opened);
+            if (active!==session || hoverFolder===opened || opened.contains(hoverFolder)) return;
+            openedFolders.delete(opened); changePreview(opened,true);
+          },450));
+        }
+      }
       if (hoverFolder===folder) return;
       clearTimeout(hoverTimer); hoverTimer=0; hoverFolder=folder;
-      let changed=false;
-      for (const opened of [...openedFolders]) if (opened!==folder && !opened.contains(folder)) {
-        if (opened.isConnected) opened.collapsed=true;
-        openedFolders.delete(opened); changed=true;
-      }
-      if (changed) {
-        refreshRows();
-        clearTimeout(geometryTimer); geometryTimer=setTimeout(refreshRows,200);
-      }
       if (!folder?.collapsed) return;
       const session=active;
       hoverTimer=setTimeout(()=>{
         hoverTimer=0;
         if (active!==session || hoverFolder!==folder || !folder.isConnected || !folder.collapsed) return;
-        openedFolders.add(folder); folder.collapsed=false;
-        refreshRows();
-        clearTimeout(geometryTimer); geometryTimer=setTimeout(refreshRows,200);
+        openedFolders.add(folder); changePreview(folder,false);
       },350);
     }
     function clear() {
@@ -406,6 +426,19 @@
       const a=active, {strip,rows,y,source,pins}=a;
       const separator=getState(strip).separator;
       const boundary=a.boundary;
+      // Keep the last half-row and the gap below an expanded folder inside
+      // that folder, rather than resolving them to the next folder's header.
+      if (source.kind==='tab') for (const header of rows) {
+        if (header.kind!=='folder' || header.item.collapsed) continue;
+        const children=rows.filter(r=>r.parent===header.item && !a.moving.has(r));
+        const last=children.at(-1);
+        if (!last) continue;
+        const next=rows.find(r=>r.top>=last.bottom && r!==last && r.kind!=='separator');
+        const end=Math.min(last.bottom+14,next?next.top+Math.min(6,next.height*.2):boundary+8);
+        if (y>=last.top+last.height/2 && y<=end) {
+          return {kind:'folder',folder:header.item,container:header.item.groupContainer,anchor:last.item,after:true};
+        }
+      }
       const inPins=pins && y<boundary;
       const available=rows.filter(r=>r.kind!=='separator' && !a.moving.has(r) && (inPins ? r.container!==strip : r.container===strip));
       if (inPins) {
@@ -444,7 +477,7 @@
       if (!active) return;
       const a=active, dest=target();
       const dy=Math.max(a.top-a.origin,Math.min(a.bottom-a.origin-a.height,a.y-a.startY));
-      const intoFolder=a.source.kind==='tab' && Boolean(dest.folder);
+      const intoFolder=a.source.kind==='tab' && Boolean(dest.folder || dest.topic);
       // Preview and commit use the same slot. A separate threshold for the
       // animation used to show one position and commit to another on release.
       let ref=a.rows.find(r=>r.item===dest.anchor||r.nodes.includes(dest.anchor));
