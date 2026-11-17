@@ -9,3 +9,5 @@ The five create-menu glyphs are Apple SF Symbols rendered through AppKit at medi
 
 
 Sidebar row translation, native placement reconciliation and drag-image handling adapted from Zia, Copyright (c) 2026 z1nk (MIT). https://github.com/z1n-k/zia/blob/fadfaaf/src/js/28-tab-dragging.js. See ZIA-LICENSE.txt.
+
+Mini-player grid layout adapted from Zia’s 09-music-player.css (MIT, Copyright 2026 z1nk).

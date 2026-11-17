@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.10
+// @version        0.14.11
 // ==/UserScript==
 (() => {
   'use strict';
@@ -859,6 +859,111 @@
     @media (prefers-reduced-motion:no-preference) {
       zen-folder:not([collapsed]) > .tab-group-container { animation:ztt-folder-open 135ms ease-out; }
       @keyframes ztt-folder-open { from { opacity:.3; clip-path:inset(0 0 90% 0); } to { opacity:1; clip-path:inset(0); } }
+    }
+
+    #tabbrowser-tabs tab[zen-essential] :is(.tab-audio-button,.tab-icon-overlay:is([soundplaying],[muted]):not([crashed],[activemedia-blocked])) { display:none!important; }
+    #tabbrowser-tabs tab[zen-essential]:is([soundplaying],[muted]) .tab-icon-image { opacity:1!important; visibility:visible!important; }
+    #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]) .tab-audio-button {
+      display:flex!important; overflow:hidden; min-inline-size:0!important; flex:none!important;
+      inline-size:0!important; margin-inline:0!important; opacity:0; visibility:hidden;
+      transition:inline-size 160ms ease,margin-inline-end 160ms ease,opacity 140ms ease,visibility 0s 160ms;
+    }
+    #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]):is([soundplaying],[muted],[activemedia-blocked]) .tab-audio-button {
+      inline-size:var(--tab-content-button-size,16px)!important; margin-inline-end:var(--tab-icon-margin-inline-end,6px)!important;
+      opacity:1; visibility:visible; transition-delay:0s;
+    }
+    #tabbrowser-tabs[expanded] tab:not([zen-essential]):not([soundplaying],[muted],[activemedia-blocked]) .tab-audio-button::part(button) {
+      background-image:var(--ztt-playing-icon); background-position:center; background-size:16px; background-repeat:no-repeat;
+      -moz-context-properties:fill; fill:currentColor;
+    }
+    @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs .tab-audio-button { transition:none!important; } }
+    #zen-media-controls-toolbar {
+      --zia-media-ring-size:30px; --zia-media-art-size:26px; --zia-squircle-grow:1; --zia-squircle:squircle;
+      .zen-media-card {
+        border-radius:15px!important; corner-shape:squircle; padding:9px 10px!important; box-sizing:border-box;
+        background:light-dark(#fafafa,#292929)!important; color:light-dark(#222,#eee); box-shadow:0 2px 8px #0001!important;
+      }
+  .zen-media-main-vbox {
+    height: 100% !important;
+    align-content: center;
+    display: grid !important;
+
+    grid-template-columns: var(--zia-media-ring-size) minmax(0, 1fr) auto auto auto auto auto;
+    grid-template-rows: auto auto auto;
+    column-gap: 0;
+    row-gap: 0;
+    align-items: center;
+  }
+
+  .zen-media-main-vbox > vbox,
+  .zen-media-info-container,
+  .zen-media-buttons-hbox,
+  .zen-media-controls-hbox,
+  .zen-media-playback-buttons {
+    display: contents !important;
+  }
+
+  .zen-media-focus-button {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center !important;
+    position: relative;
+    width: var(--zia-media-ring-size) !important;
+    height: var(--zia-media-ring-size) !important;
+    min-width: var(--zia-media-ring-size) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    justify-content: center !important;
+    align-items: center !important;
+    background: transparent !important;
+
+    & > .toolbarbutton-icon,
+    & image {
+      width: var(--zia-media-art-size) !important;
+      height: var(--zia-media-art-size) !important;
+      min-width: var(--zia-media-art-size) !important;
+      min-height: var(--zia-media-art-size) !important;
+      padding: 0 !important;
+      border-radius: calc(7px * var(--zia-squircle-grow)) !important;
+      corner-shape: var(--zia-squircle) !important;
+      transition: opacity 0.2s ease, filter 0.2s ease;
+    }
+
+  }
+  .zen-media-info-vbox {
+    grid-column: 2 / 7;
+    grid-row: 1;
+    min-width: 0;
+    padding-inline: 8px 4px;
+    justify-content: center;
+    gap: 2px;
+
+    &::before {
+      display: none !important;
+    }
+
+    & label {
+      min-height: 0 !important;
+      height: auto !important;
+      line-height: 1.25;
+    }
+  }
+
+  .zen-media-mute-button { grid-column: 7; grid-row: 1; }
+  .zen-media-previoustrack-button { grid-column: 3; grid-row: 3; }
+  .zen-media-playpause-button { grid-column: 4; grid-row: 3; }
+  .zen-media-nexttrack-button { grid-column: 5; grid-row: 3; }
+
+      .zen-media-main-vbox { height:auto!important; row-gap:3px; }
+      .zen-media-info-vbox { display:flex!important; opacity:1!important; }
+      .zen-media-title { font-weight:600; }
+      .zen-media-artist { opacity:.68; }
+      .zen-media-progress-hbox { grid-column:1/-1; grid-row:2; }
+      .zen-media-pip-button { grid-column:6; grid-row:3; }
+      .zen-media-close-button { grid-column:7; grid-row:3; }
+      .media-device-buttons { grid-column:1/3; grid-row:3; }
+      .toolbarbutton-1:hover { background-color:color-mix(in srgb,currentColor 8%,transparent)!important; }
+      .zen-media-notes { display:none!important; }
     }
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
