@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.0
+// @version        0.14.1
 // ==/UserScript==
 (() => {
   'use strict';
@@ -332,6 +332,13 @@
     function destination() {
       const {rows,tab,y,strip} = active;
       const state = strip === activeStrip() ? getState(strip) : {assignments:new Map()};
+      // The separator and the upper half of the first heading are the
+      // ungrouped insertion slot, even when there are no loose tabs yet.
+      const firstHeader = rows.find(r=>r.node.classList.contains('ztt-header'));
+      if (state.assignments.has(tab) && firstHeader && y < firstHeader.top + firstHeader.height/2) {
+        const anchor = rows.find(r=>r.node!==tab && r.node.localName==='tab');
+        if (anchor) return {anchor:anchor.node,after:false,topic:null};
+      }
       const row = rows.find(r=>r.node!==tab && y<r.top+r.height);
       if (!row) {
         const last = rows.filter(r=>r.node!==tab&&r.node.localName==='tab').at(-1);
@@ -349,8 +356,10 @@
       const {strip,tab} = active;
       const box = strip.getBoundingClientRect();
       active.y = event.clientY;
+      const separator = strip === activeStrip() ? getState(strip).separator : null;
+      const top = separator ? Math.min(box.top,separator.getBoundingClientRect().top) : box.top;
       const inside = gZenWorkspaces.activeWorkspaceElement.contains(tab) && event.clientX>=box.left && event.clientX<=box.right &&
-        event.clientY>=box.top && event.clientY<=box.bottom;
+        event.clientY>=top && event.clientY<=box.bottom;
       if (!inside) {
         if (active.inside) {
           for (const row of active.rows) {
