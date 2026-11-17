@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.3
+// @version        0.14.4
 // ==/UserScript==
 (() => {
   'use strict';
@@ -401,7 +401,7 @@
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
             el.style.setProperty('--ztt-drag-y',Math.round(dy)+'px');
-            el.style.setProperty('--ztt-drag-scale',intoFolder?'.94':'1');
+            el.style.setProperty('--ztt-drag-scale',intoFolder?'.90':'1');
             el.setAttribute('ztt-lift','');
           }
           continue;
@@ -508,20 +508,24 @@
       active.bottom=Math.max(active.bottom,active.top+Math.min(mine.height,rootBox.height));
       active.boundary=getState(strip).separator?.getBoundingClientRect().top??normalBox.top;
       active.unclipped=[];
-      // Local folder/section overflow must not cut off the lifted row. Retain
-      // real scroll viewports, and clamp the row to their visible boundaries.
-      for (let parent=source.item.parentElement;parent && parent!==gBrowser.tabContainer;parent=parent.parentElement) {
+      // Overflow alone is not enough: Zen also clips section paint and folder
+      // contents using clip-path/contain. Restore every override after the drag.
+      const parentOf=el=>el.assignedSlot||el.parentElement||el.getRootNode()?.host;
+      for (let parent=parentOf(source.item);parent && parent!==document.documentElement;parent=parentOf(parent)) {
         const css=getComputedStyle(parent);
         const scrolling=/auto|scroll/.test(css.overflowY)&&parent.scrollHeight>parent.clientHeight+1;
+        const overrides={'clip-path':'none','contain':'none','mask-image':'none'};
         if (scrolling) {
           const box=parent.getBoundingClientRect();
-          active.top=Math.max(active.top,box.top); active.bottom=Math.min(active.bottom,box.bottom);
-          continue;
+          const top=box.top+parent.clientTop;
+          active.top=Math.max(active.top,top+2);
+          active.bottom=Math.min(active.bottom,top+parent.clientHeight-2);
+        } else {
+          overrides['overflow-x']='visible'; overrides['overflow-y']='visible';
         }
-        const properties=['overflow-x','overflow-y'].map(name=>[name,parent.style.getPropertyValue(name),parent.style.getPropertyPriority(name)]);
+        const properties=Object.keys(overrides).map(name=>[name,parent.style.getPropertyValue(name),parent.style.getPropertyPriority(name)]);
         active.unclipped.push([parent,properties]);
-        parent.style.setProperty('overflow-x','visible','important');
-        parent.style.setProperty('overflow-y','visible','important');
+        for (const [name,value] of Object.entries(overrides)) parent.style.setProperty(name,value,'important');
       }
       sidebarDragging=true;
       document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
@@ -803,10 +807,10 @@
   style.textContent = `
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
-      transform:translateY(var(--ztt-drag-y,0px)) scaleX(var(--ztt-drag-scale,1))!important; transform-origin:center!important; position:relative!important; }
-    #tabbrowser-tabs [ztt-lift] { z-index:40!important; visibility:visible!important; transition:none!important; }
+      transform:translateY(var(--ztt-drag-y,0px))!important; scale:var(--ztt-drag-scale,1) 1!important; transform-origin:center!important; position:relative!important; }
+    #tabbrowser-tabs [ztt-lift] { z-index:40!important; visibility:visible!important; transition:scale 140ms cubic-bezier(.2,.8,.2,1)!important; }
     #tabbrowser-tabs [ztt-slide] { z-index:1!important; transition:transform 160ms cubic-bezier(.2,.8,.2,1)!important; }
-    @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs [ztt-slide] { transition:none!important; } }
+    @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs :is([ztt-slide],[ztt-lift]) { transition:none!important; } }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
       border-radius:22px; corner-shape:squircle; background:light-dark(#fffefe,#2c2b30); color:light-dark(#171619,#f5f3f7);
