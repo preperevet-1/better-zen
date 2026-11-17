@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.1
+// @version        0.14.2
 // ==/UserScript==
 (() => {
   'use strict';
@@ -80,7 +80,7 @@
   const NS = 'http://www.w3.org/1999/xhtml';
   const states = new Map();
   const abort = new AbortController();
-  let observer, timer, startupTimer, originalAddTab, patchedAddTab, groupMenu, destroyed = false, busy = false;
+  let observer, timer, startupTimer, originalAddTab, patchedAddTab, groupMenu, destroyed = false, busy = false, sidebarDragging = false;
   const node = (tag, cls, text) => {
     const el = document.createElementNS(NS, tag);
     if (cls) el.className = cls;
@@ -264,426 +264,278 @@
     }
   }
   // Sidebar motion adapted from Zia's moveTabsLikeDia (MIT, Copyright 2026 z1nk).
-  // Keep layout fixed during the drag; translate rows, then commit on drop.
+  // One owner from dragstart through dragend: native drag handlers never run
+  // alongside this transaction. Geometry is measured before any transforms.
   function installSidebarMotion() {
-    let active = null, frame = 0;
+    let active = null, frame = 0, finishing = false;
     const blank = node('div','ztt-drag-blank');
     document.documentElement.append(blank);
     const listen = (type,fn) => window.addEventListener(type,fn,{capture:true,signal:abort.signal});
-    const originalImages = new Map();
-    for (const name of ['setDragImage','updateDragImage']) {
-      const original = DataTransfer.prototype[name];
-      if (!original) continue;
-      const patched = function(image,x,y) {
-        return active?.inside ? original.call(this,blank,0,0) : original.call(this,image,x,y);
-      };
-      DataTransfer.prototype[name] = patched;
-      originalImages.set(name,{original,patched});
+    const isTab = el => el?.localName === 'tab' && !el.closing &&
+      !el.hasAttribute('zen-essential') && !el.hasAttribute('zen-empty-tab') && !el.hasAttribute('zen-glance-tab');
+    const isFolder = el => el?.isZenFolder || el?.localName === 'zen-folder';
+    const visible = el => el?.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden';
+    const contents = folder => [...folder.groupContainer.children].filter(el=>isTab(el)||isFolder(el));
+    function row(nodes, data) {
+      const boxes = nodes.map(el=>el.getBoundingClientRect());
+      const top = Math.min(...boxes.map(r=>r.top)), bottom = Math.max(...boxes.map(r=>r.bottom));
+      return {...data,nodes,top,bottom,height:bottom-top,shifted:false};
+    }
+    function measure(source, strip, pins) {
+      const rows = [], state = getState(strip), whole = source.kind !== 'tab';
+      function pinned(container, parent = null) {
+        for (const el of container.children) {
+          if (!visible(el)) continue;
+          if (isFolder(el)) {
+            if (whole && !el.contains(source.item) || el === source.item) rows.push(row([el],{kind:'folder',item:el,container,parent}));
+            else {
+              const label = el.labelContainerElement || el.querySelector('.tab-group-label-container');
+              if (label && visible(label)) rows.push(row([label],{kind:'folder',item:el,container,parent}));
+              if ((!el.collapsed || el.contains(source.item)) && el.groupContainer) pinned(el.groupContainer,el);
+            }
+          } else if (isTab(el)) rows.push(row([el],{kind:'tab',item:el,container,parent}));
+        }
+      }
+      if (pins) pinned(pins);
+      const included = new Set();
+      for (const el of strip.children) {
+        if (included.has(el) || !visible(el)) continue;
+        if (el.classList.contains('ztt-header')) {
+          const topic=el.dataset.zttGroup, tabs=members(strip,topic);
+          if (whole) {
+            tabs.forEach(tab=>included.add(tab));
+            rows.push(row([el,...tabs],{kind:'group',item:el,topic,container:strip,tabs}));
+          } else rows.push(row([el],{kind:'header',item:el,topic,container:strip}));
+        } else if (isTab(el)) rows.push(row([el],{kind:'tab',item:el,topic:state.assignments.get(el),container:strip}));
+      }
+      return rows;
+    }
+    function removeTransforms(session) {
+      for (const r of session.rows) for (const el of r.nodes) {
+        el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
+        el.style.removeProperty('--ztt-drag-y');
+      }
     }
     function clear() {
-      cancelAnimationFrame(frame); frame = 0;
-      if (active) for (const row of active.rows) {
-        row.node.removeAttribute('ztt-slide');
-        row.node.removeAttribute('ztt-lift');
-        row.node.style.removeProperty('--ztt-drag-y');
-      }
-      active = null;
+      cancelAnimationFrame(frame); frame=0;
+      if (active) removeTransforms(active);
+      active=null; sidebarDragging=false;
+      schedule();
     }
-    const plainTab = tab => tab?.localName === 'tab' && !tab.closing &&
-      !tab.hasAttribute('zen-essential') && !tab.hasAttribute('zen-empty-tab') &&
-      !tab.hasAttribute('zen-glance-tab') && !tab.group?.hasAttribute('split-view-group');
-    function measure(strip) {
-      return [...strip.children].filter(el => plainTab(el) || el.classList.contains('ztt-header')).map(node => {
-        const rect = node.getBoundingClientRect();
-        return {node,top:rect.top,height:rect.height,shifted:false};
-      });
-    }
-    function draw() {
-      frame = 0;
-      if (!active?.inside) return;
-      const {tab,rows,startY,y,pitch,origin} = active;
-      const middle = origin + y-startY + tab.getBoundingClientRect().height/2;
-      for (const row of rows) {
-        if (row.node === tab) {
-          row.node.style.setProperty('--ztt-drag-y',Math.round(y-startY)+'px');
-          row.node.setAttribute('ztt-lift','');
-          continue;
-        }
-        // Zia's hysteresis prevents rows oscillating around a boundary.
-        row.shifted = row.top > origin
-          ? middle > row.top + (row.shifted ? -10 : 8)
-          : middle < row.top+row.height-(row.shifted ? -10 : 8);
-        const delta = row.shifted ? (row.top > origin ? -pitch : pitch) : 0;
-        row.node.style.setProperty('--ztt-drag-y',delta+'px');
-        row.node.setAttribute('ztt-slide','');
-      }
-    }
-    listen('dragstart',event => {
-      clear();
-      const tab = event.target.closest?.('tab');
-      const strip = tab?.parentElement;
-      if (busy || !plainTab(tab) || !gZenWorkspaces.activeWorkspaceElement.contains(tab) || (tab.multiselected && gBrowser.selectedTabs.length > 1)) return;
-      const rows = measure(strip), mine = rows.find(row=>row.node===tab);
-      const adjacent = rows.filter(row=>row.node.localName==='tab' && row!==mine)
-        .map(row=>Math.abs(row.top-mine.top)).filter(gap=>gap>=mine.height && gap<mine.height*1.6);
-      active = {strip,tab,rows,startY:event.clientY,y:event.clientY,origin:mine.top,
-        pitch:adjacent.length ? Math.min(...adjacent) : mine.height,inside:true};
-    });
-    function destination() {
-      const {rows,tab,y,strip} = active;
-      const state = strip === activeStrip() ? getState(strip) : {assignments:new Map()};
-      // The separator and the upper half of the first heading are the
-      // ungrouped insertion slot, even when there are no loose tabs yet.
-      const firstHeader = rows.find(r=>r.node.classList.contains('ztt-header'));
-      if (state.assignments.has(tab) && firstHeader && y < firstHeader.top + firstHeader.height/2) {
-        const anchor = rows.find(r=>r.node!==tab && r.node.localName==='tab');
-        if (anchor) return {anchor:anchor.node,after:false,topic:null};
-      }
-      const row = rows.find(r=>r.node!==tab && y<r.top+r.height);
-      if (!row) {
-        const last = rows.filter(r=>r.node!==tab&&r.node.localName==='tab').at(-1);
-        return last && {anchor:last.node,after:true,topic:state.assignments.get(last.node)};
-      }
-      if (row.node.classList.contains('ztt-header')) {
-        const topic = row.node.dataset.zttGroup;
-        const anchor = members(strip,topic).find(t=>t!==tab);
-        return anchor && {anchor,after:false,topic:y<row.top+2?null:topic};
-      }
-      return {anchor:row.node,after:y>=row.top+row.height/2,topic:state.assignments.get(row.node)};
-    }
-    function handle(event) {
-      if (!active) return;
-      const {strip,tab} = active;
-      const box = strip.getBoundingClientRect();
-      active.y = event.clientY;
-      const separator = strip === activeStrip() ? getState(strip).separator : null;
-      const top = separator ? Math.min(box.top,separator.getBoundingClientRect().top) : box.top;
-      const inside = gZenWorkspaces.activeWorkspaceElement.contains(tab) && event.clientX>=box.left && event.clientX<=box.right &&
-        event.clientY>=top && event.clientY<=box.bottom;
-      if (!inside) {
-        if (active.inside) {
-          for (const row of active.rows) {
-            row.node.removeAttribute('ztt-slide');row.node.removeAttribute('ztt-lift');
-          }
-          active.inside=false;
-          originalImages.get('updateDragImage')?.original.call(event.dataTransfer,tab,8,8);
-        }
-        return;
-      }
-      if (!active.inside) {
-        active.rows=measure(strip);
-        active.origin=tab.getBoundingClientRect().top;
-        active.startY=event.clientY;
-        active.inside=true;
-        originalImages.get('updateDragImage')?.original.call(event.dataTransfer,blank,0,0);
-      }
-      event.preventDefault();event.stopImmediatePropagation();
-      event.dataTransfer.dropEffect='move';
-      if (event.type!=='drop') {
-        if (!frame) frame=requestAnimationFrame(draw);
-        return;
-      }
-      const dest=destination();
-      const before=new Map(active.rows.map(row=>[row.node,row.node.getBoundingClientRect().top]));
-      clear();
-      const controller=gBrowser.tabContainer.tabDragAndDrop;
-      if (tab._dragData) {
-        controller.finishMoveTogetherSelectedTabs(tab);
-        controller.finishAnimateTabMove();
-        controller._resetTabsAfterDrop(tab);
-      }
-      if (dest) {
-        if (!tab.pinned) {
-          const state=getState(strip);
-          if (dest.topic) state.assignments.set(tab,dest.topic);
-          else state.assignments.delete(tab);
-          saveGroup(tab,dest.topic);
-        }
-        if (dest.after) gBrowser.moveTabAfter(tab,dest.anchor);
-        else gBrowser.moveTabBefore(tab,dest.anchor);
-        if (strip === activeStrip()) render(strip);
-      }
-      if (!matchMedia('(prefers-reduced-motion:reduce)').matches) {
-        for (const [node,top] of before) if (node.isConnected) {
-          const delta=top-node.getBoundingClientRect().top;
-          if (delta) node.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],
-            {duration:160,easing:'cubic-bezier(.2,.8,.2,1)'});
-        }
-      }
-    }
-    for (const type of ['dragenter','dragover','drop']) listen(type,handle);
-    listen('drag',event=>{
-      if (active?.inside && (event.clientX || event.clientY)) {
-        active.y=event.clientY;
-        if (!frame) frame=requestAnimationFrame(draw);
-      }
-    });
-    listen('scroll',event=>{
-      if (!active?.inside || !event.target.contains?.(active.tab)) return;
-      const row=active.rows.find(row=>row.node===active.tab);
-      const shift=Number.parseFloat(active.tab.style.getPropertyValue('--ztt-drag-y')) || 0;
-      const delta=active.tab.getBoundingClientRect().top-shift-row.top;
-      for (const item of active.rows) item.top+=delta;
-      active.origin+=delta;active.startY+=delta;
-      if (!frame) frame=requestAnimationFrame(draw);
-    });
-    listen('dragend',clear);
-    abort.signal.addEventListener('abort',()=>{
-      clear();blank.remove();
-      for (const [name,{original,patched}] of originalImages)
-        if (DataTransfer.prototype[name]===patched) DataTransfer.prototype[name]=original;
-    },{once:true});
-  }
-  function installDrag() {
-    let drag = null, indicator = null;
-    const listen = (type, fn) => window.addEventListener(type,fn,{capture:true,signal:abort.signal});
-    function mark(element, edge) {
-      if (!element) {
-        if (indicator) gZenPinnedTabManager.removeTabContainersDragoverClass(false);
-        indicator = null;
-        return;
-      }
-      const rect = element.getBoundingClientRect();
-      const headingGap = element.classList.contains('ztt-header') ? 4 : 0;
-      gBrowser.tabContainer.tabDragAndDrop._placeDropIndicator({
-        left:rect.left + 4, width:Math.max(0,rect.width - 8),
-        top:edge === 'before' ? rect.top - headingGap : rect.bottom + headingGap
-      });
-      indicator = element;
-    }
-    function reset() { mark(null); drag = null; }
-    listen('dragstart', event => {
-      reset();
-      const strip = activeStrip();
-      if (busy || !strip) return;
-      if (event.target.closest?.('.ztt-group-close,.ztt-name-input')) { event.preventDefault(); return; }
-      const header = event.target.closest?.('.ztt-header');
-      if (header?.parentElement === strip) {
-        drag = {strip, name:header.dataset.zttGroup};
-        event.dataTransfer.setData('application/x-zen-tidy-group', drag.name);
-        event.dataTransfer.effectAllowed = 'move';
-        event.stopImmediatePropagation();
-        return;
-      }
-      const tab = event.target.closest?.('tab');
-      if (eligible(tab,strip)) drag = {strip, tab};
-    });
-    function destination(event) {
-      if (busy) return null;
-      // Zen also starts drags directly (for example from its tab list).
-      // The native data transfer identifies the source even when dragstart was retargeted.
-      const active = activeStrip();
-      if (!drag?.name && active) {
-        const flavor = 'application/x-moz-tabbrowser-tab';
-        const native = event.dataTransfer?.types.includes(flavor) && event.dataTransfer.mozGetDataAt(flavor,0);
-        if (native) {
-          const source = native.isZenFolder ? native : native.localName !== 'tab' && native.closest?.('zen-folder');
-          if (source?.isZenFolder && !source.isLiveFolder && gZenWorkspaces.activeWorkspaceElement.contains(source) &&
-              source.allItems.every(el => el.localName === 'tab') && source.tabs.some(t => !t.hasAttribute('zen-empty-tab'))) {
-            drag = {strip:active,source};
-          } else {
-            if (!eligible(native,active) || native.multiselected && gBrowser.selectedTabs.length > 1) return null;
-            drag = {strip:active,tab:native};
-          }
-        }
-      }
-      if (!drag || drag.strip !== active) return null;
-      const {strip, name, tab} = drag;
-      const s = getState(strip);
-      const target = event.target;
-      const y = event.clientY;
-      const bounds = strip.getBoundingClientRect();
-      const insideX = event.clientX >= bounds.left && event.clientX <= bounds.right;
-      const inColumn = insideX && y >= bounds.top && y <= bounds.bottom;
-      if (drag.source) {
-        if (!strip.contains(target) && !inColumn) return null;
-        for (const header of s.headers) {
-          const last = members(strip,header.dataset.zttGroup).at(-1);
-          if (last && y < (header.getBoundingClientRect().top + last.getBoundingClientRect().bottom)/2)
-            return {kind:'unpin',element:header,edge:'before',anchor:members(strip,header.dataset.zttGroup)[0]};
-        }
-        return {kind:'unpin',element:tabsIn(strip).at(-1) || strip,edge:'after'};
-      }
-      if (name) {
-        const separator = s.separator;
-        const section = separator?.parentElement;
-        const rect = section?.getBoundingClientRect();
-        if (section && (section.contains(target) || (insideX && y >= rect.top && y <= rect.bottom))) {
-          // A temporary group becomes a top-level folder. Its marker and insertion
-          // anchor must describe the same gap, including beside an expanded folder.
-          const pins = [...section.children].filter(el =>
-            el.matches('zen-folder,tab-group,tab[pinned]') && el.getBoundingClientRect().height > 0);
-          for (const [i,pin] of pins.entries()) {
-            const box = pin.getBoundingClientRect();
-            const label = pin.labelContainerElement?.getBoundingClientRect();
-            if (y < box.top + (label?.height || box.height)/2)
-              return {kind:'folder',element:pin,edge:'before',insertBefore:pin};
-            if (y <= box.bottom)
-              return {kind:'folder',element:pin,edge:'after',insertBefore:pins[i+1] || separator};
-          }
-          return {kind:'folder',element:separator,edge:'before',insertBefore:separator};
-        }
-        if (!strip.contains(target) && !inColumn) return null;
-        // The header and its last member delimit one drop target. Only one
-        // midpoint per group participates, regardless of the hovered child.
-        let lastSlot = null;
-        for (const header of s.headers) {
-          const topic = header.dataset.zttGroup;
-          if (topic === name) continue;
-          const last = members(strip,topic).at(-1);
-          if (!last) continue;
-          const top = header.getBoundingClientRect().top;
-          const bottom = last.getBoundingClientRect().bottom;
-          if (y < (top + bottom) / 2)
-            return {kind:'order',topic,edge:'before',element:header};
-          lastSlot = {kind:'order',topic,edge:'after',element:last};
-          if (y <= bottom) return lastSlot;
-        }
-        return lastSlot;
-      }
-      // Usually the event already names the row. Check its geometry because
-      // Zen can also retarget events to the dragged tab or the strip.
-      const containsY = el => {
-        const rect = el.getBoundingClientRect();
-        return y >= rect.top && y < rect.bottom;
-      };
-      const candidate = target.closest?.('tab,.ztt-header');
-      let hit = null;
-      if (inColumn) {
-        if (candidate?.parentElement === strip && containsY(candidate)) hit = candidate;
-        else hit = [...strip.children].find(el =>
-          (eligible(el,strip) || el.classList.contains('ztt-header')) && containsY(el));
-      }
-      if (tab && s.assignments.has(tab) && (s.separator?.contains(target) ||
-          insideX && s.separator && s.headers[0] && y >= s.separator.getBoundingClientRect().top &&
-          y < s.headers[0].getBoundingClientRect().top && !hit && !target.closest?.('.zen-workspace-pinned-tabs-section'))) {
-        return {kind:'tab',topic:null,anchor:tabsIn(strip).find(t => t !== tab),edge:'before',element:s.separator,indicatorEdge:'after'};
-      }
-      if (!strip.contains(target) && !inColumn) return null;
-      const hovered = hit || target;
-      const header = hovered.closest?.('.ztt-header');
-      const row = hovered.closest?.('tab');
-      const topic = header?.dataset.zttGroup || s.assignments.get(row);
-      if (tab) {
-        if (!eligible(tab,strip) || row === tab) return null;
-        const after = el => {
-          const rect = el.getBoundingClientRect();
-          return y >= rect.top + rect.height / 2;
-        };
-        if (header) {
-          const items = members(strip,topic).filter(t => t !== tab);
-          if (!items.length) return null;
-          const firstHeader = s.headers[0] === header;
-          if (firstHeader && y <= header.getBoundingClientRect().top + 2) return {kind:'tab',topic:null,anchor:items[0],element:header,edge:'before'};
-          return {kind:'tab',topic,anchor:items[0],element:header,edge:'before',indicatorEdge:'after'};
-        }
-        if (row) {
-          if (!eligible(row,strip) || (!topic && !s.assignments.has(tab))) return null;
-          return {kind:'tab',topic,anchor:row,element:row,edge:after(row)?'after':'before'};
-        }
-        const next = [...strip.children].find(el => el !== tab && (eligible(el,strip) || el.classList.contains('ztt-header')) && el.getBoundingClientRect().bottom > event.clientY);
-        if (next?.classList.contains('ztt-header') && next === s.headers[0])
-          return {kind:'tab',topic:null,anchor:members(strip,next.dataset.zttGroup)[0],element:next,edge:'before'};
-        if (next && eligible(next,strip))
-          return {kind:'tab',topic:s.assignments.get(next),anchor:next,element:next,edge:'before'};
-        return null;
-      }
+    function sourceFor(event) {
+      const path=event.composedPath();
+      const header=path.find(el=>el.classList?.contains('ztt-header'));
+      if (header) return {kind:'group',item:header,topic:header.dataset.zttGroup};
+      const tab=path.find(isTab);
+      if (tab) return {kind:'tab',item:tab};
+      const folder=path.find(isFolder);
+      if (folder) return {kind:'folder',item:folder};
       return null;
     }
-    function handle(event) {
-      const dest = destination(event);
-      if (!dest) { mark(null); return; }
-      if (event.type !== 'drop' && dest.kind === 'tab' && drag?.tab?._dragData && dest.topic &&
-          getState(drag.strip).assignments.get(drag.tab) === dest.topic &&
-          event.target.closest?.('tab') === dest.anchor) {
-        mark(null);
-        return;
-      }
-      event.preventDefault(); event.stopImmediatePropagation();
-      event.dataTransfer.dropEffect = 'move';
-      if (event.type !== 'drop') { mark(dest.element,dest.indicatorEdge || dest.edge); return; }
-      const {strip, name, tab, source} = drag;
-      reset();
-      const s = getState(strip);
-      if (dest.kind === 'unpin') {
-        const label = uniqueName(strip,(source.label || 'New Group').slice(0,60));
-        const tabs = [...source.tabs].filter(t => !t.hasAttribute('zen-empty-tab'));
-        const ordered = tabsIn(strip);
-        ordered.splice(dest.anchor ? ordered.indexOf(dest.anchor) : ordered.length,0,...tabs);
-        const convert = async () => {
-          await source.unpackTabs();
-          for (const member of tabs) gBrowser.unpinTab(member);
-          moveInOrder(strip,ordered);
-          assignManual(strip,tabs,label);
-        };
-        convert().catch(report);
-        return;
-      }
-      if (dest.kind === 'folder') {
-        Promise.resolve().then(() => folder(strip,name,dest.insertBefore)).catch(report);
-        return;
-      }
-      if (dest.kind === 'tab') {
-        if (!dest.anchor || dest.anchor === tab) return;
-        const controller = gBrowser.tabContainer.tabDragAndDrop;
-        const nativeDrag = Boolean(tab._dragData);
-        if (nativeDrag) {
-          controller.finishMoveTogetherSelectedTabs(tab);
-          controller.finishAnimateTabMove();
-          controller._resetTabsAfterDrop(tab);
+    function target() {
+      const a=active, {strip,rows,y,source,pins}=a;
+      const separator=getState(strip).separator;
+      const boundary=separator?.getBoundingClientRect().top ?? strip.getBoundingClientRect().top;
+      const inPins=pins && y<boundary;
+      const available=rows.filter(r=>!a.moving.has(r) && (inPins ? r.container!==strip : r.container===strip));
+      if (inPins) {
+        // Folder labels are explicit destinations for tabs, but entire folders
+        // and temporary groups reorder as blocks instead of nesting by accident.
+        const hit=available.find(r=>y>=r.top && y<=r.bottom);
+        if (source.kind==='tab' && hit?.kind==='folder' && y>hit.top+hit.height*.25) {
+          return {kind:'folder',folder:hit.item,container:hit.item.groupContainer,anchor:contents(hit.item).find(t=>t!==source.item)||null,after:false};
         }
-        if (dest.topic && s.assignments.get(tab) === dest.topic) {
-          const header = s.headers.find(h => h.dataset.zttGroup === dest.topic);
-          if (header) {
-            // Keep the header before the first member even when either end
-            // of this move is the first tab. Membership is already persisted.
-            const first = header.nextElementSibling;
-            const before = new Map(members(strip,dest.topic).map(t => [t,t.getBoundingClientRect().top]));
-            if (dest.edge === 'before') gBrowser.moveTabBefore(tab,dest.anchor);
-            else gBrowser.moveTabAfter(tab,dest.anchor);
-            if (dest.anchor === first && dest.edge === 'before' && tab.previousElementSibling !== header)
-              strip.insertBefore(header,tab);
-            if (!matchMedia('(prefers-reduced-motion:reduce)').matches) {
-              for (const [member,top] of before) {
-                const delta = top - member.getBoundingClientRect().top;
-                if (delta) member.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],
-                  {duration:150,easing:'cubic-bezier(.2,.8,.2,1)'});
-              }
-            }
-            return;
+        const next=available.find(r=>y<r.top+r.height/2);
+        const prev=available.at(-1);
+        const ref=next||prev;
+        if (!ref) return {kind:'pins',container:pins,anchor:separator,after:false};
+        return {kind:ref.parent?'folder':'pins',folder:ref.parent,container:ref.container,anchor:ref.item,after:!next};
+      }
+      if (source.kind!=='tab') {
+        const next=available.find(r=>y<r.top+r.height/2);
+        const prev=available.at(-1), ref=next||prev;
+        return {kind:'normal',container:strip,anchor:ref ? (ref.kind==='group' ? (next?ref.tabs[0]:ref.tabs.at(-1)):ref.item) : null,after:!next,topic:null};
+      }
+      const firstHeader=available.find(r=>r.kind==='header');
+      if (firstHeader && y<firstHeader.top+firstHeader.height/2) {
+        const loose=available.filter(r=>r.kind==='tab'&&!r.topic);
+        const next=loose.find(r=>y<r.top+r.height/2);
+        const last=loose.at(-1);
+        return {kind:'normal',container:strip,anchor:next?.item||last?.item||members(strip,firstHeader.topic).find(t=>t!==source.item),after:!next&&Boolean(last),topic:null};
+      }
+      const hit=available.find(r=>y<r.bottom);
+      if (hit?.kind==='header') return {kind:'normal',container:strip,anchor:members(strip,hit.topic).find(t=>t!==source.item),after:false,topic:hit.topic};
+      const ref=hit||available.filter(r=>r.kind==='tab').at(-1);
+      if (!ref) return {kind:'normal',container:strip,anchor:null,after:true,topic:null};
+      return {kind:'normal',container:strip,anchor:ref.item,after:!hit||y>=ref.top+ref.height/2,topic:ref.topic};
+    }
+    function draw() {
+      frame=0;
+      if (!active) return;
+      const a=active, dest=target();
+      // Preview and commit use the same slot. A separate threshold for the
+      // animation used to show one position and commit to another on release.
+      let ref=a.rows.find(r=>r.item===dest.anchor||r.nodes.includes(dest.anchor));
+      if (!ref && dest.folder) ref=a.rows.find(r=>r.item===dest.folder);
+      if (dest.kind==='normal' && !dest.topic && ref?.topic) {
+        ref=a.rows.find(r=>r.kind==='header'&&r.topic===ref.topic)||ref;
+      }
+      const gap=ref ? (dest.after?ref.bottom:ref.top) : (dest.kind==='normal'?a.strip.getBoundingClientRect().bottom:a.pins.getBoundingClientRect().bottom);
+      for (const r of a.rows) {
+        if (a.moving.has(r)) {
+          for (const el of r.nodes) {
+            el.style.setProperty('--ztt-drag-y',Math.round(a.y-a.startY)+'px');
+            el.setAttribute('ztt-lift','');
           }
+          continue;
         }
-        if (dest.topic) s.assignments.set(tab,dest.topic);
-        else s.assignments.delete(tab);
-        saveGroup(tab,dest.topic);
-        if (dest.edge === 'before') gBrowser.moveTabBefore(tab,dest.anchor);
-        else gBrowser.moveTabAfter(tab,dest.anchor);
-        render(strip);
-        if (nativeDrag && controller._dropLandingArmed && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          controller._landDragImageOnElements?.([tab]);
+        const below=r.top>a.origin;
+        const shift=below ? r.top<gap : r.bottom>gap;
+        for (const el of r.nodes) {
+          el.style.setProperty('--ztt-drag-y',(shift?(below?-a.pitch:a.pitch):0)+'px');
+          el.setAttribute('ztt-slide','');
         }
-        return;
-      } else {
-        const moving = members(strip,name);
-        if (!moving.length) return;
-        const remaining = tabsIn(strip).filter(t => !moving.includes(t));
-        const targetMembers = dest.topic ? members(strip,dest.topic) : [];
-        let index;
-        if (targetMembers.length) {
-          index = dest.edge === 'after' ? remaining.indexOf(targetMembers.at(-1))+1 : remaining.indexOf(targetMembers[0]);
+      }
+    }
+    function place(item, dest) {
+      const {anchor,after,container}=dest;
+      if (anchor===item) return;
+      if (anchor?.isConnected && (isTab(anchor)||isFolder(anchor))) {
+        if (after) gBrowser.moveTabAfter(item,anchor);
+        else gBrowser.moveTabBefore(item,anchor);
+      }
+      // Zen can clamp a native move to the old pinned/group container. As in
+      // Zia, reconcile the DOM with the exact slot shown by the drag preview.
+      if (anchor?.parentElement===container) {
+        if (after && anchor.nextElementSibling!==item) anchor.after(item);
+        else if (!after && item.nextElementSibling!==anchor) container.insertBefore(item,anchor);
+      } else if (item.parentElement!==container || container.lastElementChild!==item) container.append(item);
+      gBrowser.tabContainer._invalidateCachedTabs();
+    }
+    function membership(tab,topic,strip) {
+      for (const state of states.values()) state.assignments.delete(tab);
+      if (topic) {
+        getState(strip).assignments.set(tab,topic);
+        manualTabs.add(tab);
+      }
+      saveGroup(tab,topic);
+    }
+    async function commit(a,dest) {
+      const {source,strip}=a, item=source.item;
+      if (source.kind==='tab') {
+        const oldFolder=item.group;
+        if (oldFolder && oldFolder!==dest.folder) gBrowser.ungroupTab(item);
+        if (dest.kind==='normal') {
+          if (item.pinned) gBrowser.unpinTab(item);
+          membership(item,dest.topic,strip);
         } else {
-          index = dest.edge === 'after' ? remaining.length : remaining.findIndex(t => s.assignments.has(t));
-          if (index < 0) index = remaining.length;
+          membership(item,null,strip);
+          if (!item.pinned) gBrowser.pinTab(item);
+          if (dest.folder && item.group!==dest.folder) dest.folder.addTabs([item]);
         }
-        remaining.splice(index,0,...moving);
-        moveInOrder(strip,remaining);
+        place(item,dest);
+      } else if (source.kind==='group') {
+        const tabs=members(strip,source.topic);
+        if (dest.kind!=='normal') {
+          await gZenFolders.createFolder(tabs,{label:source.topic,insertBefore:dest.after?dest.anchor?.nextElementSibling:dest.anchor,workspaceId:gZenWorkspaces.activeWorkspace});
+          for (const tab of tabs) membership(tab,null,strip);
+        } else {
+          let slot=dest;
+          for (const tab of tabs) { place(tab,slot); slot={...dest,anchor:tab,after:true}; }
+        }
+      } else if (dest.kind==='normal') {
+        // Converting nested folders would discard their hierarchy. Keep them
+        // intact; ordinary folders convert to temporary groups below the divider.
+        if (contents(item).some(isFolder) || item.isLiveFolder) return;
+        const tabs=[...item.tabs].filter(isTab), name=uniqueName(strip,(item.label||'New Group').slice(0,60));
+        await item.unpackTabs();
+        let slot=dest;
+        for (const tab of tabs) {
+          if (tab.pinned) gBrowser.unpinTab(tab);
+          membership(tab,name,strip); place(tab,slot); slot={...dest,anchor:tab,after:true};
+        }
+      } else {
+        if (dest.folder===item || item.contains(dest.container)) return;
+        place(item,dest);
       }
       render(strip);
     }
+    listen('dragstart',event=>{
+      const source=sourceFor(event), strip=activeStrip(), workspace=gZenWorkspaces.activeWorkspaceElement;
+      if (!source || !strip || !workspace.contains(source.item)) return;
+      // Own all supported sources, including labels and tabs inside folders.
+      // Cancel unsupported actions instead of falling back to a second engine.
+      event.stopImmediatePropagation();
+      if (busy || finishing || event.composedPath().some(el=>el.matches?.('button,input,.tab-close-button')) || source.item.group?.hasAttribute('split-view-group')) {
+        event.preventDefault(); return;
+      }
+      clear();
+      const pins=gZenWorkspaces.pinnedTabsContainer;
+      const rows=measure(source,strip,pins), mine=rows.find(r=>r.item===source.item);
+      if (!mine) { event.preventDefault(); return; }
+      const moving=new Set([mine]);
+      const next=rows[rows.indexOf(mine)+1];
+      const pitch=next && next.top>=mine.bottom && next.top-mine.bottom<20 ? next.top-mine.top : mine.height;
+      active={source,strip,pins,rows,moving,startY:event.clientY,y:event.clientY,origin:mine.top,height:mine.height,pitch};
+      sidebarDragging=true;
+      event.dataTransfer.effectAllowed='move';
+      // Keep Gecko's drag source stable when a lazy tab loads and replaces its
+      // label. This is transport data only; native movement handlers stay off.
+      event.dataTransfer.mozSetDataAt('application/x-moz-tabbrowser-tab',source.item,0);
+      event.dataTransfer.setData('application/x-zen-tidy-sidebar',source.kind);
+      event.dataTransfer.mozCursor='default';
+      if (event.isTrusted) event.dataTransfer.addElement(source.item);
+      event.dataTransfer.setDragImage(blank,0,0);
+      draw();
+    });
+    function inside(event) {
+      const box=active.strip.getBoundingClientRect(), pins=active.pins?.getBoundingClientRect();
+      return event.clientX>=box.left && event.clientX<=box.right && event.clientY>=Math.min(box.top,pins?.top??box.top) && event.clientY<=box.bottom;
+    }
+    async function handle(event) {
+      if (!active) return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      const valid=inside(event);
+      event.dataTransfer.dropEffect=valid?'move':'none';
+      active.y=event.clientY;
+      if (event.type!=='drop') { if (!frame) frame=requestAnimationFrame(draw); return; }
+      const a=active, dest=valid?target():null;
+      const before=new Map(a.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
+      cancelAnimationFrame(frame); frame=0; removeTransforms(a); active=null;
+      finishing=true;
+      try {
+        if (dest) await commit(a,dest);
+        if (!matchMedia('(prefers-reduced-motion:reduce)').matches) for (const [el,top] of before) if (el.isConnected) {
+          const delta=top-el.getBoundingClientRect().top;
+          if (delta) el.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],{duration:160,easing:'cubic-bezier(.2,.8,.2,1)'});
+        }
+      } catch(error) { report(error); }
+      finally { finishing=false; sidebarDragging=false; schedule(); }
+    }
     for (const type of ['dragenter','dragover','drop']) listen(type,handle);
-    listen('dragleave',event => { if (!drag?.strip.contains(event.relatedTarget) && !indicator?.contains(event.relatedTarget)) mark(null); });
-    listen('dragend',reset);
-    abort.signal.addEventListener('abort',reset,{once:true});
+    listen('drag',event=>{
+      if (!active) return;
+      event.stopImmediatePropagation();
+      if (event.clientX||event.clientY) { active.y=event.clientY; if (!frame) frame=requestAnimationFrame(draw); }
+    });
+    listen('dragleave',event=>{if(active)event.stopImmediatePropagation();});
+    listen('dragend',event=>{
+      if (!active && !finishing && !event.dataTransfer?.types.includes('application/x-zen-tidy-sidebar')) return;
+      event.stopImmediatePropagation();
+      if (!finishing) clear();
+    });
+    listen('scroll',()=>{
+      if (!active) return;
+      // Scroll moves the coordinate system, not the cursor or the target order.
+      const a=active, r=[...a.moving][0], el=r.nodes[0];
+      const shift=Number.parseFloat(el.style.getPropertyValue('--ztt-drag-y'))||0;
+      const delta=el.getBoundingClientRect().top-shift-r.top;
+      for (const item of a.rows) { item.top+=delta; item.bottom+=delta; }
+      a.origin+=delta; a.startY+=delta;
+      if (!frame) frame=requestAnimationFrame(draw);
+    });
+    abort.signal.addEventListener('abort',()=>{clear();blank.remove();},{once:true});
   }
   function installInsertionHook() {
     originalAddTab = gBrowser.addTab;
@@ -890,7 +742,7 @@
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (destroyed || busy) return;
-      if (gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
+      if (sidebarDragging || gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
       for (const [strip, s] of states) if (!strip.isConnected) { removeHeaders(s); unmountControl(s); states.delete(strip); }
       const strip = activeStrip();
       if (strip) render(strip);
@@ -1271,7 +1123,6 @@
     installCreateMenu();
     installInsertionHook();
     installSidebarMotion();
-    installDrag();
     installSelectionMenu();
     for (const event of ['SSTabRestored','SSTabRestoring','TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
       gBrowser.tabContainer.addEventListener(event, schedule, { signal:abort.signal });
