@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.18
+// @version        0.14.19
 // ==/UserScript==
 (() => {
   'use strict';
@@ -831,6 +831,12 @@
       if (destroyed || busy) return;
       if (sidebarDragging || gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
       for (const [strip, s] of states) if (!strip.isConnected) { removeHeaders(s); unmountControl(s); states.delete(strip); }
+      for (const tab of document.querySelectorAll('.tabbrowser-tab[zen-essential]')) {
+        const url = URL.parse(tab.linkedBrowser?.currentURI?.spec || '');
+        const host = url?.hostname.replace(/^www\./i, '');
+        const initial = Array.from(host || tab.label?.trim() || '•')[0].toLocaleUpperCase();
+        if (tab.getAttribute('ztt-initial') !== initial) tab.setAttribute('ztt-initial', initial);
+      }
       const strip = activeStrip();
       if (strip) render(strip);
     }, 100);
@@ -865,7 +871,25 @@
       display:none!important;
     }
     #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]) .tab-content {
-      padding-inline-start:12px!important;
+      padding-inline-start:15px!important;
+    }
+    #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]):is([soundplaying]:not([muted]),[ztt-muted-playing],[activemedia-blocked]) .tab-content {
+      padding-inline-start:6px!important;
+    }
+    .tabbrowser-tab:is([pending],[discarded],[zen-unloaded]):not([selected],[visuallyselected]) .tab-label {
+      color:color-mix(in srgb,currentColor 72%,transparent)!important;
+    }
+    .tabbrowser-tab[zen-essential][ztt-initial] {
+      position:relative;
+      & .tab-icon-stack { visibility:hidden!important; }
+      &::after { content:attr(ztt-initial); position:absolute; inset:0; display:grid;
+        place-items:center; pointer-events:none; font-size:15px; font-weight:600; }
+    }
+    #tabbrowser-tabs .tabbrowser-tab[zen-essential]:is([selected],[visuallyselected]) .tab-background {
+      background:var(--tab-selected-bgcolor,light-dark(#fafafa,#47474b))!important;
+      border-color:transparent!important; outline:none!important;
+      box-shadow:var(--tab-selected-shadow,0 1px 2px rgb(0 0 0 / .16))!important;
+      &::before, &::after { opacity:0!important; }
     }
     #tabbrowser-tabs tab[zen-essential] :is(.tab-audio-button,.tab-icon-overlay:is([soundplaying],[muted]):not([crashed],[activemedia-blocked])) { display:none!important; }
     #tabbrowser-tabs tab[zen-essential]:is([soundplaying],[muted]) .tab-icon-image { opacity:1!important; visibility:visible!important; }
@@ -965,7 +989,8 @@
   .zen-media-nexttrack-button { grid-column: 5; grid-row: 3; }
 
       .zen-media-main-vbox { height:auto!important; row-gap:3px; }
-      .zen-media-info-vbox { display:flex!important; opacity:1!important; }
+      .zen-media-info-vbox { display:flex!important; opacity:1!important; overflow:hidden;
+        mask-image:linear-gradient(to right,transparent,#000 8px,#000 calc(100% - 8px),transparent)!important; }
       .zen-media-title { font-weight:600; }
       .zen-media-artist { opacity:.68; }
       .zen-media-progress-hbox { grid-column:1/-1; grid-row:2; }
@@ -1448,7 +1473,7 @@
     }
     // Observe only browser workspace attributes, not our header mutations.
     observer = new MutationObserver(schedule);
-    observer.observe(document.documentElement, { subtree:true, attributes:true, attributeFilter:['zen-workspace-id','active','zen-active','zen-sidebar-expanded'] });
+    observer.observe(document.documentElement, { subtree:true, attributes:true, attributeFilter:['zen-workspace-id','active','zen-active','zen-sidebar-expanded','zen-essential'] });
     window.addEventListener('unload', destroy, { once:true, signal:abort.signal });
     schedule();
   }
