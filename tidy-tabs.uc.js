@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.13.1
+// @version        0.14.0
 // ==/UserScript==
 (() => {
   'use strict';
@@ -262,6 +262,168 @@
       }
       previous = tab;
     }
+  }
+  // Sidebar motion adapted from Zia's moveTabsLikeDia (MIT, Copyright 2026 z1nk).
+  // Keep layout fixed during the drag; translate rows, then commit on drop.
+  function installSidebarMotion() {
+    let active = null, frame = 0;
+    const blank = node('div','ztt-drag-blank');
+    document.documentElement.append(blank);
+    const listen = (type,fn) => window.addEventListener(type,fn,{capture:true,signal:abort.signal});
+    const originalImages = new Map();
+    for (const name of ['setDragImage','updateDragImage']) {
+      const original = DataTransfer.prototype[name];
+      if (!original) continue;
+      const patched = function(image,x,y) {
+        return active?.inside ? original.call(this,blank,0,0) : original.call(this,image,x,y);
+      };
+      DataTransfer.prototype[name] = patched;
+      originalImages.set(name,{original,patched});
+    }
+    function clear() {
+      cancelAnimationFrame(frame); frame = 0;
+      if (active) for (const row of active.rows) {
+        row.node.removeAttribute('ztt-slide');
+        row.node.removeAttribute('ztt-lift');
+        row.node.style.removeProperty('--ztt-drag-y');
+      }
+      active = null;
+    }
+    const plainTab = tab => tab?.localName === 'tab' && !tab.closing &&
+      !tab.hasAttribute('zen-essential') && !tab.hasAttribute('zen-empty-tab') &&
+      !tab.hasAttribute('zen-glance-tab') && !tab.group?.hasAttribute('split-view-group');
+    function measure(strip) {
+      return [...strip.children].filter(el => plainTab(el) || el.classList.contains('ztt-header')).map(node => {
+        const rect = node.getBoundingClientRect();
+        return {node,top:rect.top,height:rect.height,shifted:false};
+      });
+    }
+    function draw() {
+      frame = 0;
+      if (!active?.inside) return;
+      const {tab,rows,startY,y,pitch,origin} = active;
+      const middle = origin + y-startY + tab.getBoundingClientRect().height/2;
+      for (const row of rows) {
+        if (row.node === tab) {
+          row.node.style.setProperty('--ztt-drag-y',Math.round(y-startY)+'px');
+          row.node.setAttribute('ztt-lift','');
+          continue;
+        }
+        // Zia's hysteresis prevents rows oscillating around a boundary.
+        row.shifted = row.top > origin
+          ? middle > row.top + (row.shifted ? -10 : 8)
+          : middle < row.top+row.height-(row.shifted ? -10 : 8);
+        const delta = row.shifted ? (row.top > origin ? -pitch : pitch) : 0;
+        row.node.style.setProperty('--ztt-drag-y',delta+'px');
+        row.node.setAttribute('ztt-slide','');
+      }
+    }
+    listen('dragstart',event => {
+      clear();
+      const tab = event.target.closest?.('tab');
+      const strip = tab?.parentElement;
+      if (busy || !plainTab(tab) || !gZenWorkspaces.activeWorkspaceElement.contains(tab) || (tab.multiselected && gBrowser.selectedTabs.length > 1)) return;
+      const rows = measure(strip), mine = rows.find(row=>row.node===tab);
+      const adjacent = rows.filter(row=>row.node.localName==='tab' && row!==mine)
+        .map(row=>Math.abs(row.top-mine.top)).filter(gap=>gap>=mine.height && gap<mine.height*1.6);
+      active = {strip,tab,rows,startY:event.clientY,y:event.clientY,origin:mine.top,
+        pitch:adjacent.length ? Math.min(...adjacent) : mine.height,inside:true};
+    });
+    function destination() {
+      const {rows,tab,y,strip} = active;
+      const state = strip === activeStrip() ? getState(strip) : {assignments:new Map()};
+      const row = rows.find(r=>r.node!==tab && y<r.top+r.height);
+      if (!row) {
+        const last = rows.filter(r=>r.node!==tab&&r.node.localName==='tab').at(-1);
+        return last && {anchor:last.node,after:true,topic:state.assignments.get(last.node)};
+      }
+      if (row.node.classList.contains('ztt-header')) {
+        const topic = row.node.dataset.zttGroup;
+        const anchor = members(strip,topic).find(t=>t!==tab);
+        return anchor && {anchor,after:false,topic:y<row.top+2?null:topic};
+      }
+      return {anchor:row.node,after:y>=row.top+row.height/2,topic:state.assignments.get(row.node)};
+    }
+    function handle(event) {
+      if (!active) return;
+      const {strip,tab} = active;
+      const box = strip.getBoundingClientRect();
+      active.y = event.clientY;
+      const inside = gZenWorkspaces.activeWorkspaceElement.contains(tab) && event.clientX>=box.left && event.clientX<=box.right &&
+        event.clientY>=box.top && event.clientY<=box.bottom;
+      if (!inside) {
+        if (active.inside) {
+          for (const row of active.rows) {
+            row.node.removeAttribute('ztt-slide');row.node.removeAttribute('ztt-lift');
+          }
+          active.inside=false;
+          originalImages.get('updateDragImage')?.original.call(event.dataTransfer,tab,8,8);
+        }
+        return;
+      }
+      if (!active.inside) {
+        active.rows=measure(strip);
+        active.origin=tab.getBoundingClientRect().top;
+        active.startY=event.clientY;
+        active.inside=true;
+        originalImages.get('updateDragImage')?.original.call(event.dataTransfer,blank,0,0);
+      }
+      event.preventDefault();event.stopImmediatePropagation();
+      event.dataTransfer.dropEffect='move';
+      if (event.type!=='drop') {
+        if (!frame) frame=requestAnimationFrame(draw);
+        return;
+      }
+      const dest=destination();
+      const before=new Map(active.rows.map(row=>[row.node,row.node.getBoundingClientRect().top]));
+      clear();
+      const controller=gBrowser.tabContainer.tabDragAndDrop;
+      if (tab._dragData) {
+        controller.finishMoveTogetherSelectedTabs(tab);
+        controller.finishAnimateTabMove();
+        controller._resetTabsAfterDrop(tab);
+      }
+      if (dest) {
+        if (!tab.pinned) {
+          const state=getState(strip);
+          if (dest.topic) state.assignments.set(tab,dest.topic);
+          else state.assignments.delete(tab);
+          saveGroup(tab,dest.topic);
+        }
+        if (dest.after) gBrowser.moveTabAfter(tab,dest.anchor);
+        else gBrowser.moveTabBefore(tab,dest.anchor);
+        if (strip === activeStrip()) render(strip);
+      }
+      if (!matchMedia('(prefers-reduced-motion:reduce)').matches) {
+        for (const [node,top] of before) if (node.isConnected) {
+          const delta=top-node.getBoundingClientRect().top;
+          if (delta) node.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],
+            {duration:160,easing:'cubic-bezier(.2,.8,.2,1)'});
+        }
+      }
+    }
+    for (const type of ['dragenter','dragover','drop']) listen(type,handle);
+    listen('drag',event=>{
+      if (active?.inside && (event.clientX || event.clientY)) {
+        active.y=event.clientY;
+        if (!frame) frame=requestAnimationFrame(draw);
+      }
+    });
+    listen('scroll',event=>{
+      if (!active?.inside || !event.target.contains?.(active.tab)) return;
+      const row=active.rows.find(row=>row.node===active.tab);
+      const shift=Number.parseFloat(active.tab.style.getPropertyValue('--ztt-drag-y')) || 0;
+      const delta=active.tab.getBoundingClientRect().top-shift-row.top;
+      for (const item of active.rows) item.top+=delta;
+      active.origin+=delta;active.startY+=delta;
+      if (!frame) frame=requestAnimationFrame(draw);
+    });
+    listen('dragend',clear);
+    abort.signal.addEventListener('abort',()=>{
+      clear();blank.remove();
+      for (const [name,{original,patched}] of originalImages)
+        if (DataTransfer.prototype[name]===patched) DataTransfer.prototype[name]=original;
+    },{once:true});
   }
   function installDrag() {
     let drag = null, indicator = null;
@@ -727,6 +889,12 @@
   }
   const style = node('style');
   style.textContent = `
+    .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
+    #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
+      transform:translateY(var(--ztt-drag-y,0px))!important; position:relative!important; }
+    #tabbrowser-tabs [ztt-lift] { z-index:40!important; visibility:visible!important; transition:none!important; }
+    #tabbrowser-tabs [ztt-slide] { z-index:1!important; transition:transform 160ms cubic-bezier(.2,.8,.2,1)!important; }
+    @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs [ztt-slide] { transition:none!important; } }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
       border-radius:22px; corner-shape:squircle; background:light-dark(#fffefe,#2c2b30); color:light-dark(#171619,#f5f3f7);
@@ -1093,6 +1261,7 @@
     installPinnedBehavior();
     installCreateMenu();
     installInsertionHook();
+    installSidebarMotion();
     installDrag();
     installSelectionMenu();
     for (const event of ['SSTabRestored','SSTabRestoring','TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
