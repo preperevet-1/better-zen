@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.2
+// @version        0.14.3
 // ==/UserScript==
 (() => {
   'use strict';
@@ -267,7 +267,13 @@
   // One owner from dragstart through dragend: native drag handlers never run
   // alongside this transaction. Geometry is measured before any transforms.
   function installSidebarMotion() {
-    let active = null, frame = 0, finishing = false;
+    let active = null, frame = 0, finishing = false, folderPressed = false;
+    const originalFolderPopup = gZenFolders.openTabsPopup;
+    const guardedFolderPopup = function(...args) {
+      if (folderPressed || sidebarDragging || finishing) return;
+      return originalFolderPopup.apply(this,args);
+    };
+    gZenFolders.openTabsPopup = guardedFolderPopup;
     const blank = node('div','ztt-drag-blank');
     document.documentElement.append(blank);
     const listen = (type,fn) => window.addEventListener(type,fn,{capture:true,signal:abort.signal});
@@ -297,6 +303,8 @@
         }
       }
       if (pins) pinned(pins);
+      const separator=state.separator;
+      if (separator && visible(separator)) rows.push(row([separator],{kind:'separator',item:separator,container:pins}));
       const included = new Set();
       for (const el of strip.children) {
         if (included.has(el) || !visible(el)) continue;
@@ -314,7 +322,13 @@
       for (const r of session.rows) for (const el of r.nodes) {
         el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
         el.style.removeProperty('--ztt-drag-y');
+        el.style.removeProperty('--ztt-drag-scale');
       }
+      for (const [el,properties] of session.unclipped || []) for (const [name,value,priority] of properties) {
+        if (value) el.style.setProperty(name,value,priority);
+        else el.style.removeProperty(name);
+      }
+      session.unclipped=[];
     }
     function clear() {
       cancelAnimationFrame(frame); frame=0;
@@ -335,9 +349,9 @@
     function target() {
       const a=active, {strip,rows,y,source,pins}=a;
       const separator=getState(strip).separator;
-      const boundary=separator?.getBoundingClientRect().top ?? strip.getBoundingClientRect().top;
+      const boundary=a.boundary;
       const inPins=pins && y<boundary;
-      const available=rows.filter(r=>!a.moving.has(r) && (inPins ? r.container!==strip : r.container===strip));
+      const available=rows.filter(r=>r.kind!=='separator' && !a.moving.has(r) && (inPins ? r.container!==strip : r.container===strip));
       if (inPins) {
         // Folder labels are explicit destinations for tabs, but entire folders
         // and temporary groups reorder as blocks instead of nesting by accident.
@@ -373,6 +387,8 @@
       frame=0;
       if (!active) return;
       const a=active, dest=target();
+      const dy=Math.max(a.top-a.origin,Math.min(a.bottom-a.origin-a.height,a.y-a.startY));
+      const intoFolder=a.source.kind==='tab' && Boolean(dest.folder);
       // Preview and commit use the same slot. A separate threshold for the
       // animation used to show one position and commit to another on release.
       let ref=a.rows.find(r=>r.item===dest.anchor||r.nodes.includes(dest.anchor));
@@ -384,7 +400,8 @@
       for (const r of a.rows) {
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
-            el.style.setProperty('--ztt-drag-y',Math.round(a.y-a.startY)+'px');
+            el.style.setProperty('--ztt-drag-y',Math.round(dy)+'px');
+            el.style.setProperty('--ztt-drag-scale',intoFolder?'.94':'1');
             el.setAttribute('ztt-lift','');
           }
           continue;
@@ -460,6 +477,12 @@
       }
       render(strip);
     }
+    listen('pointerdown',event=>{
+      folderPressed=event.button===0 && sourceFor(event)?.kind==='folder';
+      if (folderPressed) document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
+    });
+    listen('pointerup',()=>{folderPressed=false;});
+    listen('pointercancel',()=>{folderPressed=false;});
     listen('dragstart',event=>{
       const source=sourceFor(event), strip=activeStrip(), workspace=gZenWorkspaces.activeWorkspaceElement;
       if (!source || !strip || !workspace.contains(source.item)) return;
@@ -477,7 +500,31 @@
       const next=rows[rows.indexOf(mine)+1];
       const pitch=next && next.top>=mine.bottom && next.top-mine.bottom<20 ? next.top-mine.top : mine.height;
       active={source,strip,pins,rows,moving,startY:event.clientY,y:event.clientY,origin:mine.top,height:mine.height,pitch};
+      const rootBox=gBrowser.tabContainer.getBoundingClientRect();
+      const pinBox=pins?.getBoundingClientRect(), normalBox=strip.getBoundingClientRect();
+      const essentials=gZenWorkspaces.getCurrentEssentialsContainer?.()?.getBoundingClientRect();
+      active.top=Math.max(Math.min(pinBox?.top??normalBox.top,normalBox.top),essentials?.height?essentials.bottom:0,rootBox.top);
+      active.bottom=Math.min(rootBox.bottom,window.innerHeight);
+      active.bottom=Math.max(active.bottom,active.top+Math.min(mine.height,rootBox.height));
+      active.boundary=getState(strip).separator?.getBoundingClientRect().top??normalBox.top;
+      active.unclipped=[];
+      // Local folder/section overflow must not cut off the lifted row. Retain
+      // real scroll viewports, and clamp the row to their visible boundaries.
+      for (let parent=source.item.parentElement;parent && parent!==gBrowser.tabContainer;parent=parent.parentElement) {
+        const css=getComputedStyle(parent);
+        const scrolling=/auto|scroll/.test(css.overflowY)&&parent.scrollHeight>parent.clientHeight+1;
+        if (scrolling) {
+          const box=parent.getBoundingClientRect();
+          active.top=Math.max(active.top,box.top); active.bottom=Math.min(active.bottom,box.bottom);
+          continue;
+        }
+        const properties=['overflow-x','overflow-y'].map(name=>[name,parent.style.getPropertyValue(name),parent.style.getPropertyPriority(name)]);
+        active.unclipped.push([parent,properties]);
+        parent.style.setProperty('overflow-x','visible','important');
+        parent.style.setProperty('overflow-y','visible','important');
+      }
       sidebarDragging=true;
+      document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
       event.dataTransfer.effectAllowed='move';
       // Keep Gecko's drag source stable when a lazy tab loads and replaces its
       // label. This is transport data only; native movement handlers stay off.
@@ -489,8 +536,8 @@
       draw();
     });
     function inside(event) {
-      const box=active.strip.getBoundingClientRect(), pins=active.pins?.getBoundingClientRect();
-      return event.clientX>=box.left && event.clientX<=box.right && event.clientY>=Math.min(box.top,pins?.top??box.top) && event.clientY<=box.bottom;
+      const box=active.strip.getBoundingClientRect();
+      return event.clientX>=box.left && event.clientX<=box.right;
     }
     async function handle(event) {
       if (!active) return;
@@ -498,7 +545,7 @@
       event.preventDefault();
       const valid=inside(event);
       event.dataTransfer.dropEffect=valid?'move':'none';
-      active.y=event.clientY;
+      active.y=Math.max(active.top,Math.min(active.bottom,event.clientY));
       if (event.type!=='drop') { if (!frame) frame=requestAnimationFrame(draw); return; }
       const a=active, dest=valid?target():null;
       const before=new Map(a.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
@@ -517,12 +564,13 @@
     listen('drag',event=>{
       if (!active) return;
       event.stopImmediatePropagation();
-      if (event.clientX||event.clientY) { active.y=event.clientY; if (!frame) frame=requestAnimationFrame(draw); }
+      if (event.clientX||event.clientY) { active.y=Math.max(active.top,Math.min(active.bottom,event.clientY)); if (!frame) frame=requestAnimationFrame(draw); }
     });
     listen('dragleave',event=>{if(active)event.stopImmediatePropagation();});
     listen('dragend',event=>{
       if (!active && !finishing && !event.dataTransfer?.types.includes('application/x-zen-tidy-sidebar')) return;
       event.stopImmediatePropagation();
+      folderPressed=false;
       if (!finishing) clear();
     });
     listen('scroll',()=>{
@@ -532,10 +580,13 @@
       const shift=Number.parseFloat(el.style.getPropertyValue('--ztt-drag-y'))||0;
       const delta=el.getBoundingClientRect().top-shift-r.top;
       for (const item of a.rows) { item.top+=delta; item.bottom+=delta; }
-      a.origin+=delta; a.startY+=delta;
+      a.origin+=delta; a.startY+=delta; a.boundary+=delta;
       if (!frame) frame=requestAnimationFrame(draw);
     });
-    abort.signal.addEventListener('abort',()=>{clear();blank.remove();},{once:true});
+    abort.signal.addEventListener('abort',()=>{
+      clear();blank.remove();
+      if (gZenFolders.openTabsPopup===guardedFolderPopup) gZenFolders.openTabsPopup=originalFolderPopup;
+    },{once:true});
   }
   function installInsertionHook() {
     originalAddTab = gBrowser.addTab;
@@ -752,7 +803,7 @@
   style.textContent = `
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
-      transform:translateY(var(--ztt-drag-y,0px))!important; position:relative!important; }
+      transform:translateY(var(--ztt-drag-y,0px)) scaleX(var(--ztt-drag-scale,1))!important; transform-origin:center!important; position:relative!important; }
     #tabbrowser-tabs [ztt-lift] { z-index:40!important; visibility:visible!important; transition:none!important; }
     #tabbrowser-tabs [ztt-slide] { z-index:1!important; transition:transform 160ms cubic-bezier(.2,.8,.2,1)!important; }
     @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs [ztt-slide] { transition:none!important; } }
