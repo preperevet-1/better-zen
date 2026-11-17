@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.11
+// @version        0.14.12
 // ==/UserScript==
 (() => {
   'use strict';
@@ -837,12 +837,12 @@
   }
   const style = node('style');
   style.textContent = `
-    #tabbrowser-tabs {
+    :root {
       --ztt-playing-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-3.0%22%20width%3D%222%22%20height%3D%226%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-3.0%3B-1%3B-3.0%22%20dur%3D%220.62s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%226%3B2%3B6%22%20dur%3D%220.62s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-5.5%22%20width%3D%222%22%20height%3D%2211%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-5.5%3B-1%3B-5.5%22%20dur%3D%220.69s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%2211%3B2%3B11%22%20dur%3D%220.69s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-4.0%22%20width%3D%222%22%20height%3D%228%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-4.0%3B-1%3B-4.0%22%20dur%3D%220.76s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%228%3B2%3B8%22%20dur%3D%220.76s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-6.5%22%20width%3D%222%22%20height%3D%2213%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-6.5%3B-1%3B-6.5%22%20dur%3D%220.8300000000000001s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%2213%3B2%3B13%22%20dur%3D%220.8300000000000001s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-3.5%22%20width%3D%222%22%20height%3D%227%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-3.5%3B-1%3B-3.5%22%20dur%3D%220.9s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%227%3B2%3B7%22%20dur%3D%220.9s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E");
       --ztt-muted-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E");
     }
     @media (prefers-reduced-motion:reduce) {
-      #tabbrowser-tabs { --ztt-playing-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-3.0%22%20width%3D%222%22%20height%3D%226%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-5.5%22%20width%3D%222%22%20height%3D%2211%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-4.0%22%20width%3D%222%22%20height%3D%228%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-6.5%22%20width%3D%222%22%20height%3D%2213%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-3.5%22%20width%3D%222%22%20height%3D%227%22%20rx%3D%221%22%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E"); }
+      :root { --ztt-playing-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-3.0%22%20width%3D%222%22%20height%3D%226%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-5.5%22%20width%3D%222%22%20height%3D%2211%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-4.0%22%20width%3D%222%22%20height%3D%228%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-6.5%22%20width%3D%222%22%20height%3D%2213%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-3.5%22%20width%3D%222%22%20height%3D%227%22%20rx%3D%221%22%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E"); }
     }
     #tabbrowser-tabs :is(.tab-audio-button,.tab-icon-overlay)[soundplaying] { --ztt-audio-icon:var(--ztt-playing-icon); }
     #tabbrowser-tabs :is(.tab-audio-button,.tab-icon-overlay)[muted] { --ztt-audio-icon:var(--ztt-muted-icon); }
@@ -880,15 +880,15 @@
     #zen-media-controls-toolbar {
       --zia-media-ring-size:30px; --zia-media-art-size:26px; --zia-squircle-grow:1; --zia-squircle:squircle;
       .zen-media-card {
-        border-radius:15px!important; corner-shape:squircle; padding:9px 10px!important; box-sizing:border-box;
-        background:light-dark(#fafafa,#292929)!important; color:light-dark(#222,#eee); box-shadow:0 2px 8px #0001!important;
+        border-radius:22px!important; corner-shape:squircle!important; padding:9px 10px!important; box-sizing:border-box;
+        background:light-dark(#fffefe,#2c2b30)!important; color:light-dark(#171619,#f5f3f7); box-shadow:0 2px 9px rgb(0 0 0 / .12),0 0 1px rgb(0 0 0 / .15)!important;
       }
   .zen-media-main-vbox {
     height: 100% !important;
     align-content: center;
     display: grid !important;
 
-    grid-template-columns: var(--zia-media-ring-size) minmax(0, 1fr) auto auto auto auto auto;
+    grid-template-columns:30px minmax(0,1fr) repeat(3,auto) minmax(0,1fr) 30px;
     grid-template-rows: auto auto auto;
     column-gap: 0;
     row-gap: 0;
@@ -959,12 +959,24 @@
       .zen-media-title { font-weight:600; }
       .zen-media-artist { opacity:.68; }
       .zen-media-progress-hbox { grid-column:1/-1; grid-row:2; }
-      .zen-media-pip-button { grid-column:6; grid-row:3; }
+      .zen-media-pip-button { grid-column:1; grid-row:3; }
       .zen-media-close-button { grid-column:7; grid-row:3; }
       .media-device-buttons { grid-column:1/3; grid-row:3; }
       .toolbarbutton-1:hover { background-color:color-mix(in srgb,currentColor 8%,transparent)!important; }
+      .zen-media-mute-button { list-style-image:var(--ztt-muted-icon)!important; }
+      .zen-media-card.playing:not([muted]) .zen-media-mute-button { list-style-image:var(--ztt-playing-icon)!important; }
+      .zen-media-mute-button > .toolbarbutton-icon { -moz-context-properties:fill; fill:currentColor!important; }
+      :is(.zen-media-current-time,.zen-media-duration) { display:none!important; }
+      .zen-media-progress-hbox { width:100%!important; min-width:0; margin-inline:0!important; padding-inline:0!important; box-sizing:border-box; }
+      .zen-media-progress-bar { flex:1 1 0%!important; width:100%!important; min-width:0!important; margin-inline:0!important; }
+      .zen-media-card:not(:hover):not(:has(:focus-visible)) {
+        & :is(.zen-media-progress-hbox,.zen-media-pip-button,.zen-media-close-button,.zen-media-previoustrack-button,.zen-media-playpause-button,.zen-media-nexttrack-button) { display:none!important; }
+        & .zen-media-main-vbox { grid-template-rows:auto 0 0; row-gap:0; }
+      }
+      .toolbarbutton-1:is(:hover,:active) > .toolbarbutton-icon { background-color:transparent!important; box-shadow:none!important; }
       .zen-media-notes { display:none!important; }
     }
+    :root:has(#ztt-create-panel:popover-open) #zen-media-controls-toolbar { visibility:hidden!important; pointer-events:none!important; }
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
       transform:translateY(var(--ztt-drag-y,0px))!important; transform-origin:center!important; position:relative!important; }
