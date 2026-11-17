@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.20
+// @version        0.14.22
 // ==/UserScript==
 (() => {
   'use strict';
@@ -888,7 +888,7 @@
     #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]) .tab-content {
       padding-inline-start:15px!important;
     }
-    #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]):is([soundplaying]:not([muted]),[ztt-muted-playing],[activemedia-blocked]) .tab-content {
+    #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]):is([ztt-playing], [soundplaying]:not([ztt-has-controller]),[activemedia-blocked]) .tab-content {
       padding-inline-start:10px!important;
     }
     .tabbrowser-tab:is([pending],[discarded],[zen-unloaded]):not([selected],[visuallyselected]) .tab-label {
@@ -902,7 +902,23 @@
       position:relative;
       & .tab-icon-stack, & .tab-icon-image { display:none!important; }
       &::after { content:attr(ztt-initial); position:absolute; inset:0; display:grid;
-        place-items:center; pointer-events:none; font-size:15px; font-weight:600; }
+        place-items:center; padding-block-start:2px; box-sizing:border-box; line-height:1; pointer-events:none; font-size:15px; font-weight:600; }
+    }
+    .tabbrowser-tab[zen-essential]:not([selected],[visuallyselected])::after {
+      color:light-dark(#929292,#aaa);
+    }
+    #tabbrowser-tabs .tabbrowser-tab[zen-essential] .tab-content {
+      background-image:none!important;
+    }
+    #tabbrowser-tabs[expanded] .tabbrowser-tab[busy]:not([zen-essential]) .tab-content::after {
+      content:""; flex:none; width:12px; height:12px; box-sizing:border-box;
+      align-self:center; margin-inline:5px; border:2px solid currentColor;
+      border-inline-start-color:transparent; border-radius:50%; opacity:.55; pointer-events:none;
+      animation:ztt-tab-spin 750ms linear infinite;
+    }
+    @keyframes ztt-tab-spin { to { transform:rotate(1turn); } }
+    @media(prefers-reduced-motion:reduce) {
+      #tabbrowser-tabs[expanded] .tabbrowser-tab[busy] .tab-content::after { animation:none; }
     }
     #tabbrowser-tabs .tabbrowser-tab[zen-essential]:is([selected],[visuallyselected]) .tab-background {
       background:var(--tab-selected-bgcolor,light-dark(#fafafa,#47474b))!important;
@@ -917,12 +933,17 @@
       inline-size:0!important; margin-inline:0!important; opacity:0; visibility:hidden;
       transition:inline-size 160ms ease,margin-inline-end 160ms ease,opacity 140ms ease,visibility 0s 160ms;
     }
-    #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]):is([soundplaying]:not([muted]),[ztt-muted-playing],[activemedia-blocked]) .tab-audio-button {
-      inline-size:var(--tab-content-button-size,16px)!important; margin-inline-end:var(--tab-icon-margin-inline-end,6px)!important;
+    #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]):is([ztt-playing], [soundplaying]:not([ztt-has-controller]),[activemedia-blocked]) .tab-audio-button {
+      inline-size:var(--tab-content-button-size,16px)!important; margin-inline-end:9px!important;
       opacity:1; visibility:visible; transition-delay:0s;
     }
     #tabbrowser-tabs[expanded] tab:not([zen-essential]):not([soundplaying],[muted],[activemedia-blocked]) .tab-audio-button::part(button) {
       background-image:var(--ztt-playing-icon); background-position:center; background-size:16px; background-repeat:no-repeat;
+      -moz-context-properties:fill; fill:currentColor;
+    }
+    #tabbrowser-tabs[expanded] tab[ztt-playing]:not([zen-essential],[muted]) .tab-audio-button::part(button) {
+      background-image:var(--ztt-playing-icon)!important; background-size:16px!important;
+      background-position:center!important; background-repeat:no-repeat!important;
       -moz-context-properties:fill; fill:currentColor;
     }
     @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs .tab-audio-button { transition:none!important; } }
@@ -1128,7 +1149,7 @@
     :is(#back-button,#forward-button,#reload-button) > .toolbarbutton-icon {
       position:relative; background:transparent!important; }
     :root[zen-single-toolbar="true"] .zen-essentials-container:not(:empty) {
-      padding-bottom:4px!important; }
+      padding-block:8px!important; }
     :is(#back-button,#forward-button,#reload-button,#stop-button) > .toolbarbutton-icon {
       border-radius:11px!important; corner-shape:squircle; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover {
@@ -1448,27 +1469,32 @@
       if (manager.pinHasChangedUrl === suppressReset) manager.pinHasChangedUrl = original;
     },{once:true});
   }
-  function installMutedIndicators() {
+  function installPlaybackIndicators() {
     const watched = new Map();
     function release(tab) {
-      watched.get(tab)?.abort();
+      watched.get(tab)?.listener.abort();
       watched.delete(tab);
-      tab.removeAttribute('ztt-muted-playing');
+      tab.removeAttribute('ztt-playing');
+      tab.removeAttribute('ztt-has-controller');
     }
     function sync(tab) {
-      if (!tab.hasAttribute('muted')) { release(tab); return; }
       const controller = tab.linkedBrowser?.browsingContext?.mediaController;
-      if (!controller || watched.has(tab)) return;
+      if (controller && watched.get(tab)?.controller === controller) return;
+      release(tab);
+      if (!controller) return;
+      tab.setAttribute('ztt-has-controller','');
       const listener = new AbortController();
-      watched.set(tab, listener);
-      const update = () => tab.toggleAttribute('ztt-muted-playing', controller.isPlaying);
+      watched.set(tab, {controller,listener});
+      const update = () => tab.toggleAttribute('ztt-playing', controller.isPlaying);
       for (const event of ['playbackstatechange','activated','deactivated']) {
         controller.addEventListener(event, update, {signal:listener.signal});
       }
       update();
     }
     const tabs = gBrowser.tabContainer;
-    tabs.addEventListener('TabAttrModified', event => sync(event.target), {signal:abort.signal});
+    for (const event of ['TabAttrModified','TabOpen','SSTabRestored','TabSelect','TabBrowserInserted']) {
+      tabs.addEventListener(event, e => sync(e.target), {signal:abort.signal});
+    }
     tabs.addEventListener('TabClose', event => release(event.target), {signal:abort.signal});
     abort.signal.addEventListener('abort', () => { for (const tab of watched.keys()) release(tab); }, {once:true});
     for (const tab of gBrowser.tabs) sync(tab);
@@ -1481,7 +1507,7 @@
     Services.prefs.setBoolPref('zen.splitView.enable-drag-over-split',false);
     Services.prefs.setBoolPref('zen.pinned-tab-manager.restore-pinned-tabs-to-pinned-url',true);
     gBrowser.tabContainer.tabDragAndDrop._clearDragOverSplit?.();
-    installMutedIndicators();
+    installPlaybackIndicators();
     installPinnedBehavior();
     installCreateMenu();
     installInsertionHook();
