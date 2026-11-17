@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.4
+// @version        0.14.5
 // ==/UserScript==
 (() => {
   'use strict';
@@ -268,6 +268,8 @@
   // alongside this transaction. Geometry is measured before any transforms.
   function installSidebarMotion() {
     let active = null, frame = 0, finishing = false, folderPressed = false;
+    let hoverTimer=0, geometryTimer=0, hoverFolder=null;
+    const openedFolders=new Set();
     const originalFolderPopup = gZenFolders.openTabsPopup;
     const guardedFolderPopup = function(...args) {
       if (folderPressed || sidebarDragging || finishing) return;
@@ -322,7 +324,7 @@
       for (const r of session.rows) for (const el of r.nodes) {
         el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
         el.style.removeProperty('--ztt-drag-y');
-        el.style.removeProperty('--ztt-drag-scale');
+        el.style.removeProperty('--ztt-drag-inset');
       }
       for (const [el,properties] of session.unclipped || []) for (const [name,value,priority] of properties) {
         if (value) el.style.setProperty(name,value,priority);
@@ -330,9 +332,63 @@
       }
       session.unclipped=[];
     }
+    function cancelHoverTimers() {
+      clearTimeout(hoverTimer); clearTimeout(geometryTimer);
+      hoverTimer=0; geometryTimer=0; hoverFolder=null;
+    }
+    function closePreviewFolders(keep=null) {
+      cancelHoverTimers();
+      for (const folder of openedFolders) {
+        if (folder.isConnected && folder!==keep && !folder.contains(keep)) folder.collapsed=true;
+      }
+      openedFolders.clear();
+    }
+    function refreshRows() {
+      if (!active) return;
+      const a=active;
+      for (const r of a.rows) for (const el of r.nodes) {
+        el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
+        el.style.removeProperty('--ztt-drag-y');
+      }
+      const rows=measure(a.source,a.strip,a.pins), mine=rows.find(r=>r.item===a.source.item);
+      if (!mine) { clear(); return; }
+      // Opening a folder changes every following row. Preserve the lifted
+      // tab's screen position while replacing the target geometry.
+      const delta=mine.top-a.origin;
+      a.startY+=delta; a.origin=mine.top; a.height=mine.height;
+      a.rows=rows; a.moving=new Set([mine]);
+      const next=rows[rows.indexOf(mine)+1];
+      a.pitch=next && next.top>=mine.bottom && next.top-mine.bottom<20?next.top-mine.top:mine.height;
+      a.boundary=getState(a.strip).separator?.getBoundingClientRect().top??a.strip.getBoundingClientRect().top;
+      draw();
+    }
+    function previewFolder(folder) {
+      if (!active || active.source.kind!=='tab') return;
+      if (hoverFolder===folder) return;
+      clearTimeout(hoverTimer); hoverTimer=0; hoverFolder=folder;
+      let changed=false;
+      for (const opened of [...openedFolders]) if (opened!==folder && !opened.contains(folder)) {
+        if (opened.isConnected) opened.collapsed=true;
+        openedFolders.delete(opened); changed=true;
+      }
+      if (changed) {
+        refreshRows();
+        clearTimeout(geometryTimer); geometryTimer=setTimeout(refreshRows,200);
+      }
+      if (!folder?.collapsed) return;
+      const session=active;
+      hoverTimer=setTimeout(()=>{
+        hoverTimer=0;
+        if (active!==session || hoverFolder!==folder || !folder.isConnected || !folder.collapsed) return;
+        openedFolders.add(folder); folder.collapsed=false;
+        refreshRows();
+        clearTimeout(geometryTimer); geometryTimer=setTimeout(refreshRows,200);
+      },350);
+    }
     function clear() {
       cancelAnimationFrame(frame); frame=0;
       if (active) removeTransforms(active);
+      closePreviewFolders();
       active=null; sidebarDragging=false;
       schedule();
     }
@@ -401,7 +457,7 @@
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
             el.style.setProperty('--ztt-drag-y',Math.round(dy)+'px');
-            el.style.setProperty('--ztt-drag-scale',intoFolder?'.90':'1');
+            el.style.setProperty('--ztt-drag-inset',intoFolder?'5%':'0px');
             el.setAttribute('ztt-lift','');
           }
           continue;
@@ -550,8 +606,12 @@
       const valid=inside(event);
       event.dataTransfer.dropEffect=valid?'move':'none';
       active.y=Math.max(active.top,Math.min(active.bottom,event.clientY));
-      if (event.type!=='drop') { if (!frame) frame=requestAnimationFrame(draw); return; }
+      if (event.type!=='drop') {
+        previewFolder(valid?target().folder:null);
+        if (!frame) frame=requestAnimationFrame(draw); return;
+      }
       const a=active, dest=valid?target():null;
+      cancelHoverTimers();
       const before=new Map(a.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
       cancelAnimationFrame(frame); frame=0; removeTransforms(a); active=null;
       finishing=true;
@@ -562,7 +622,11 @@
           if (delta) el.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],{duration:160,easing:'cubic-bezier(.2,.8,.2,1)'});
         }
       } catch(error) { report(error); }
-      finally { finishing=false; sidebarDragging=false; schedule(); }
+      finally {
+        const kept=dest?.folder?.contains(a.source.item)?dest.folder:null;
+        closePreviewFolders(kept);
+        finishing=false; sidebarDragging=false; schedule();
+      }
     }
     for (const type of ['dragenter','dragover','drop']) listen(type,handle);
     listen('drag',event=>{
@@ -807,10 +871,17 @@
   style.textContent = `
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
-      transform:translateY(var(--ztt-drag-y,0px))!important; scale:var(--ztt-drag-scale,1) 1!important; transform-origin:center!important; position:relative!important; }
-    #tabbrowser-tabs [ztt-lift] { z-index:40!important; visibility:visible!important; transition:scale 140ms cubic-bezier(.2,.8,.2,1)!important; }
+      transform:translateY(var(--ztt-drag-y,0px))!important; transform-origin:center!important; position:relative!important; }
+    #tabbrowser-tabs [ztt-lift] { z-index:40!important; visibility:visible!important; transition:none!important; }
+    #tabbrowser-tabs tab[ztt-lift] > .tab-stack {
+      box-sizing:border-box!important;
+      width:calc(100% - var(--ztt-drag-inset,0px) - var(--ztt-drag-inset,0px))!important;
+      min-width:0!important; max-width:none!important;
+      margin-inline:var(--ztt-drag-inset,0px)!important;
+      transition:width 140ms cubic-bezier(.2,.8,.2,1),margin-inline 140ms cubic-bezier(.2,.8,.2,1)!important;
+    }
     #tabbrowser-tabs [ztt-slide] { z-index:1!important; transition:transform 160ms cubic-bezier(.2,.8,.2,1)!important; }
-    @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs :is([ztt-slide],[ztt-lift]) { transition:none!important; } }
+    @media(prefers-reduced-motion:reduce) { #tabbrowser-tabs :is([ztt-slide],[ztt-lift],[ztt-lift] > .tab-stack) { transition:none!important; } }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
       border-radius:22px; corner-shape:squircle; background:light-dark(#fffefe,#2c2b30); color:light-dark(#171619,#f5f3f7);
