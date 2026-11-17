@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.13.0
+// @version        0.13.1
 // ==/UserScript==
 (() => {
   'use strict';
@@ -186,33 +186,6 @@
     });
     input.focus();
     input.select();
-  }
-  function groupSites(strip) {
-    const state = getState(strip);
-    restoreGroups(strip,state);
-    const sites = new Map();
-    for (const tab of tabsIn(strip)) {
-      if (manualTabs.has(tab)) continue;
-      const uri = tab.linkedBrowser?.currentURI;
-      if (!uri || !['http','https'].includes(uri.scheme)) continue;
-      let host;
-      try { host = Services.eTLD.getBaseDomain(uri); } catch { host = uri.host; }
-      const list = sites.get(host) || [];
-      list.push(tab); sites.set(host,list);
-    }
-    for (const [host,tabs] of sites) {
-      if (tabs.length < 3) continue;
-      const brands = {'google.com':'Google','youtube.com':'YouTube','github.com':'GitHub','chatgpt.com':'ChatGPT',
-        'claude.ai':'Claude','wikipedia.org':'Wikipedia','reddit.com':'Reddit','x.com':'X','figma.com':'Figma'};
-      const base = brands[host] || host.split('.')[0].replace(/(^|-)([a-z])/g,(_,dash,c)=>(dash?' ':'')+c.toUpperCase());
-      const name = uniqueName(strip,base,base);
-      // Avoid merging with a manually named group.
-      if (members(strip,name).some(tab => manualTabs.has(tab))) continue;
-      for (const tab of tabs) if (state.assignments.get(tab) !== name) {
-        state.assignments.set(tab,name);
-        saveGroup(tab,name);
-      }
-    }
   }
   function installSelectionMenu() {
     const menu = document.getElementById('tabContextMenu');
@@ -447,19 +420,6 @@
       return null;
     }
     function handle(event) {
-      const controller = gBrowser.tabContainer.tabDragAndDrop;
-      // Let Zen own its split preview, hover timer and final split drop.
-      if (controller._splitDropReady) return;
-      const transfer = event.dataTransfer;
-      const nativeTab = transfer?.types.includes('application/x-moz-tabbrowser-tab') &&
-        transfer.mozGetDataAt('application/x-moz-tabbrowser-tab',0);
-      const target = event.target.closest?.('.tabbrowser-tab');
-      if (nativeTab?._dragData && target && controller._dndSplitEnabled) {
-        const rect = target.getBoundingClientRect();
-        const ratio = (event.clientY-rect.top)/rect.height;
-        const threshold = controller._dndSplitThreshold/100;
-        if (ratio >= threshold && ratio <= 1-threshold) return;
-      }
       const dest = destination(event);
       if (!dest) { mark(null); return; }
       if (event.type !== 'drop' && dest.kind === 'tab' && drag?.tab?._dragData && dest.topic &&
@@ -762,7 +722,7 @@
       if (gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
       for (const [strip, s] of states) if (!strip.isConnected) { removeHeaders(s); unmountControl(s); states.delete(strip); }
       const strip = activeStrip();
-      if (strip) { groupSites(strip); render(strip); }
+      if (strip) render(strip);
     }, 100);
   }
   const style = node('style');
@@ -779,12 +739,13 @@
     .ztt-create-row:enabled:is(:hover,:focus-visible) { background:color-mix(in srgb,var(--ztt-accent) 18%,light-dark(#e6e3e9,#49454f)); }
     .ztt-create-row:disabled { opacity:.45; }
     .ztt-create-icon { flex:0 0 26.4px; height:26.4px; background:currentColor; mask: no-repeat center / contain; }
-    .ztt-create-shortcut { margin-inline-start:auto; color:color-mix(in srgb,var(--ztt-accent) 70%,currentColor);
-      opacity:.8; font-weight:550; white-space:nowrap; }
+    .ztt-create-shortcut { margin-inline-start:auto; color:#b8b8b8!important;
+      opacity:1; font-weight:550; white-space:nowrap; }
     .ztt-create-divider { border:0; border-top:1px solid color-mix(in srgb,currentColor 12%,transparent); margin:8px 4px; }
     #zen-create-new-button .toolbarbutton-icon { rotate:0deg; transition:rotate .2s ease-out; }
     #zen-create-new-button[ztt-create-open] .toolbarbutton-icon { rotate:45deg; }
     @media(prefers-reduced-motion:reduce) { #zen-create-new-button .toolbarbutton-icon { transition:none; } }
+    .tab-reset-pin-button { display:none!important; }
     .zen-workspace-scroll-to-tab, .zen-current-workspace-indicator { display:none!important; }
 
     #urlbar :is(#page-action-buttons,#zen-copy-url-button,#tracking-protection-icon-container,
@@ -1108,17 +1069,32 @@
     });
     abort.signal.addEventListener('abort',()=>{panel.hidePopover(); panel.remove();document.getElementById('zen-create-new-button')?.removeAttribute('open');},{once:true});
   }
+  function installPinnedBehavior() {
+    const manager = gZenPinnedTabManager;
+    const original = manager.pinHasChangedUrl;
+    const suppressReset = function(tab) {
+      this.resetPinChangedUrl(tab);
+      tab.removeAttribute('had-zen-pinned-changed');
+    };
+    manager.pinHasChangedUrl = suppressReset;
+    for (const tab of gBrowser.tabs) if (tab.pinned) suppressReset.call(manager,tab);
+    abort.signal.addEventListener('abort',()=>{
+      if (manager.pinHasChangedUrl === suppressReset) manager.pinHasChangedUrl = original;
+    },{once:true});
+  }
   function init() {
     if (destroyed) return;
     if (!window.gBrowser || !window.gZenWorkspaces) { startupTimer = setTimeout(init, 250); return; }
     document.documentElement.append(style);
+    Services.prefs.setStringPref('zen.urlbar.behavior','float');
+    Services.prefs.setBoolPref('zen.splitView.enable-drag-over-split',false);
+    Services.prefs.setBoolPref('zen.pinned-tab-manager.restore-pinned-tabs-to-pinned-url',true);
+    gBrowser.tabContainer.tabDragAndDrop._clearDragOverSplit?.();
+    installPinnedBehavior();
     installCreateMenu();
     installInsertionHook();
     installDrag();
     installSelectionMenu();
-    const progress = {onLocationChange:() => schedule()};
-    gBrowser.addTabsProgressListener(progress);
-    abort.signal.addEventListener('abort',()=>gBrowser.removeTabsProgressListener(progress),{once:true});
     for (const event of ['SSTabRestored','SSTabRestoring','TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
       gBrowser.tabContainer.addEventListener(event, schedule, { signal:abort.signal });
     }
