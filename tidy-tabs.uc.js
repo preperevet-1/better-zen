@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.6
+// @version        0.14.7
 // ==/UserScript==
 (() => {
   'use strict';
@@ -268,9 +268,7 @@
   // alongside this transaction. Geometry is measured before any transforms.
   function installSidebarMotion() {
     let active = null, frame = 0, finishing = false, folderPressed = false;
-    let hoverTimer=0, geometryTimer=0, hoverFolder=null;
-    const openedFolders=new Set();
-    const closeTimers=new Map();
+    let hoverFolder=null;
     const originalFolderPopup = gZenFolders.openTabsPopup;
     const guardedFolderPopup = function(...args) {
       if (folderPressed || sidebarDragging || finishing) return;
@@ -333,82 +331,18 @@
       }
       session.unclipped=[];
     }
-    function cancelHoverTimers() {
-      clearTimeout(hoverTimer); clearTimeout(geometryTimer);
-      hoverTimer=0; geometryTimer=0; hoverFolder=null;
-      for (const timer of closeTimers.values()) clearTimeout(timer);
-      closeTimers.clear();
-    }
-    function closePreviewFolders(keep=null) {
-      cancelHoverTimers();
-      for (const folder of openedFolders) {
-        if (folder.isConnected && folder!==keep && !folder.contains(keep)) folder.collapsed=true;
-      }
-      openedFolders.clear();
-    }
-    function refreshRows() {
-      if (!active) return;
-      const a=active;
-      for (const r of a.rows) for (const el of r.nodes) {
-        el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
-        el.style.removeProperty('--ztt-drag-y');
-      }
-      const rows=measure(a.source,a.strip,a.pins), mine=rows.find(r=>r.item===a.source.item);
-      if (!mine) { clear(); return; }
-      // Opening a folder changes every following row. Preserve the lifted
-      // tab's screen position while replacing the target geometry.
-      const delta=mine.top-a.origin;
-      a.startY+=delta; a.origin=mine.top; a.height=mine.height;
-      a.rows=rows; a.moving=new Set([mine]);
-      const next=rows[rows.indexOf(mine)+1];
-      a.pitch=next && next.top>=mine.bottom && next.top-mine.bottom<20?next.top-mine.top:mine.height;
-      a.boundary=getState(a.strip).separator?.getBoundingClientRect().top??a.strip.getBoundingClientRect().top;
-      draw();
-    }
-    function changePreview(folder,collapsed) {
-      if (!active || !folder.isConnected) return;
-      const before=new Map(active.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
-      folder.collapsed=collapsed;
-      // Complete native height motion before taking the new row snapshot.
-      // Neighbors then animate once from their previous screen positions.
-      for (const animation of folder.getAnimations({subtree:true})) {
-        try { animation.finish(); } catch { animation.cancel(); }
-      }
-      refreshRows();
-      if (!active || matchMedia('(prefers-reduced-motion:reduce)').matches) return;
-      for (const [el,top] of before) if (el.isConnected && !el.hasAttribute('ztt-lift')) {
-        const delta=top-el.getBoundingClientRect().top;
-        if (delta) el.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],{duration:140,easing:'cubic-bezier(.2,.8,.2,1)'});
-      }
-    }
     function previewFolder(folder) {
-      if (!active || active.source.kind!=='tab') return;
-      for (const opened of openedFolders) {
-        if (opened===folder || opened.contains(folder)) {
-          clearTimeout(closeTimers.get(opened)); closeTimers.delete(opened);
-        } else if (!closeTimers.has(opened)) {
-          const session=active;
-          closeTimers.set(opened,setTimeout(()=>{
-            closeTimers.delete(opened);
-            if (active!==session || hoverFolder===opened || opened.contains(hoverFolder)) return;
-            openedFolders.delete(opened); changePreview(opened,true);
-          },450));
-        }
-      }
       if (hoverFolder===folder) return;
-      clearTimeout(hoverTimer); hoverTimer=0; hoverFolder=folder;
-      if (!folder?.collapsed) return;
-      const session=active;
-      hoverTimer=setTimeout(()=>{
-        hoverTimer=0;
-        if (active!==session || hoverFolder!==folder || !folder.isConnected || !folder.collapsed) return;
-        openedFolders.add(folder); changePreview(folder,false);
-      },350);
+      if (hoverFolder?.isConnected) gZenFolders.updateFolderIcon(hoverFolder,'auto');
+      hoverFolder=folder?.isConnected?folder:null;
+      // Animate only Zen's native SVG state. Never change collapsed or the
+      // folder's contents, so hovering cannot move any rows or drop targets.
+      if (hoverFolder) gZenFolders.updateFolderIcon(hoverFolder,'open');
     }
     function clear() {
       cancelAnimationFrame(frame); frame=0;
       if (active) removeTransforms(active);
-      closePreviewFolders();
+      previewFolder(null);
       active=null; sidebarDragging=false;
       schedule();
     }
@@ -644,7 +578,7 @@
         if (!frame) frame=requestAnimationFrame(draw); return;
       }
       const a=active, dest=valid?target():null;
-      cancelHoverTimers();
+      previewFolder(null);
       const before=new Map(a.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
       cancelAnimationFrame(frame); frame=0; removeTransforms(a); active=null;
       finishing=true;
@@ -656,8 +590,7 @@
         }
       } catch(error) { report(error); }
       finally {
-        const kept=dest?.folder?.contains(a.source.item)?dest.folder:null;
-        closePreviewFolders(kept);
+        previewFolder(null);
         finishing=false; sidebarDragging=false; schedule();
       }
     }
