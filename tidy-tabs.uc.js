@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.13
+// @version        0.14.14
 // ==/UserScript==
 (() => {
   'use strict';
@@ -1324,7 +1324,6 @@
       panel.style.transformOrigin = (button.left + button.width/2 - left)+'px bottom';
       panel.style.top = Math.max(4,button.top-panel.offsetHeight-12)+'px';
     }
-    const footer = document.getElementById('zen-sidebar-foot-buttons');
     const resize = new ResizeObserver(positionMenu);
     if (footer) resize.observe(footer);
     window.addEventListener('resize',positionMenu,{signal:abort.signal});
