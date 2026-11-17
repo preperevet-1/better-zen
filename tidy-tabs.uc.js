@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.19
+// @version        0.14.20
 // ==/UserScript==
 (() => {
   'use strict';
@@ -279,7 +279,7 @@
     document.documentElement.append(blank);
     const listen = (type,fn) => window.addEventListener(type,fn,{capture:true,signal:abort.signal});
     const isTab = el => el?.localName === 'tab' && !el.closing &&
-      !el.hasAttribute('zen-essential') && !el.hasAttribute('zen-empty-tab') && !el.hasAttribute('zen-glance-tab');
+      !el.hasAttribute('zen-empty-tab') && !el.hasAttribute('zen-glance-tab');
     const isFolder = el => el?.isZenFolder || el?.localName === 'zen-folder';
     const visible = el => el?.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden';
     const contents = folder => [...folder.groupContainer.children].filter(el=>isTab(el)||isFolder(el));
@@ -341,6 +341,7 @@
     }
     function clear() {
       cancelAnimationFrame(frame); frame=0;
+      active?.essentialContainer?.removeAttribute('ztt-drop-essential');
       if (active) removeTransforms(active);
       previewFolder(null);
       active=null; sidebarDragging=false;
@@ -358,6 +359,8 @@
     }
     function target() {
       const a=active, {strip,rows,y,source,pins}=a;
+      if (source.kind==='tab' && a.essentials && y>=a.essentials.top && y<a.essentials.bottom)
+        return {kind:'essential',container:a.essentialContainer};
       const separator=getState(strip).separator;
       const boundary=a.boundary;
       const divider=rows.find(row=>row.kind==='separator');
@@ -411,6 +414,7 @@
       frame=0;
       if (!active) return;
       const a=active, dest=target();
+      a.essentialContainer?.toggleAttribute('ztt-drop-essential',dest.kind==='essential');
       const dy=Math.max(a.top-a.origin,Math.min(a.bottom-a.origin-a.height,a.y-a.startY));
       const intoFolder=a.source.kind==='tab' && Boolean(dest.folder || dest.topic);
       // Preview and commit use the same slot. A separate threshold for the
@@ -464,6 +468,11 @@
     async function commit(a,dest) {
       const {source,strip}=a, item=source.item;
       if (source.kind==='tab') {
+        if (dest.kind==='essential') {
+          if (!item.hasAttribute('zen-essential') && gZenPinnedTabManager.addToEssentials(item)) membership(item,null,strip);
+          return;
+        }
+        if (item.hasAttribute('zen-essential')) gZenPinnedTabManager.removeEssentials(item,dest.kind==='normal');
         const oldFolder=item.group;
         if (oldFolder && oldFolder!==dest.folder) gBrowser.ungroupTab(item);
         if (dest.kind==='normal') {
@@ -510,7 +519,8 @@
     listen('pointercancel',()=>{folderPressed=false;});
     listen('dragstart',event=>{
       const source=sourceFor(event), strip=activeStrip(), workspace=gZenWorkspaces.activeWorkspaceElement;
-      if (!source || !strip || !workspace.contains(source.item)) return;
+      const essentialContainer=gZenWorkspaces.getCurrentEssentialsContainer?.();
+      if (!source || !strip || !(workspace.contains(source.item) || essentialContainer?.contains(source.item))) return;
       // Own all supported sources, including labels and tabs inside folders.
       // Cancel unsupported actions instead of falling back to a second engine.
       event.stopImmediatePropagation();
@@ -519,7 +529,9 @@
       }
       clear();
       const pins=gZenWorkspaces.pinnedTabsContainer;
-      const rows=measure(source,strip,pins), mine=rows.find(r=>r.item===source.item);
+      const rows=measure(source,strip,pins);
+      if (essentialContainer?.contains(source.item)) rows.unshift(row([source.item],{kind:'tab',item:source.item,container:essentialContainer}));
+      const mine=rows.find(r=>r.item===source.item);
       if (!mine) { event.preventDefault(); return; }
       const moving=new Set([mine]);
       const next=rows[rows.indexOf(mine)+1];
@@ -527,8 +539,11 @@
       active={source,strip,pins,rows,moving,startY:event.clientY,y:event.clientY,origin:mine.top,height:mine.height,pitch};
       const rootBox=gBrowser.tabContainer.getBoundingClientRect();
       const pinBox=pins?.getBoundingClientRect(), normalBox=strip.getBoundingClientRect();
-      const essentials=gZenWorkspaces.getCurrentEssentialsContainer?.()?.getBoundingClientRect();
+      const essentials=essentialContainer?.getBoundingClientRect();
+      active.essentialContainer=essentialContainer;
+      if (essentials) active.essentials={top:essentials.top-2,bottom:essentials.top+Math.max(essentials.height,10)};
       active.top=Math.max(Math.min(pinBox?.top??normalBox.top,normalBox.top),essentials?.height?essentials.bottom:0,rootBox.top);
+      if (source.kind==='tab' && essentials) active.top=essentials.top;
       active.bottom=Math.min(rootBox.bottom,window.innerHeight);
       active.bottom=Math.max(active.bottom,active.top+Math.min(mine.height,rootBox.height));
       active.boundary=getState(strip).separator?.getBoundingClientRect().top??normalBox.top;
@@ -582,7 +597,7 @@
       const a=active, dest=valid?target():null;
       previewFolder(null);
       const before=new Map(a.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
-      cancelAnimationFrame(frame); frame=0; removeTransforms(a); active=null;
+      cancelAnimationFrame(frame); frame=0; removeTransforms(a); a.essentialContainer?.removeAttribute('ztt-drop-essential'); active=null;
       finishing=true;
       try {
         if (dest) await commit(a,dest);
@@ -874,14 +889,18 @@
       padding-inline-start:15px!important;
     }
     #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]):is([soundplaying]:not([muted]),[ztt-muted-playing],[activemedia-blocked]) .tab-content {
-      padding-inline-start:6px!important;
+      padding-inline-start:10px!important;
     }
     .tabbrowser-tab:is([pending],[discarded],[zen-unloaded]):not([selected],[visuallyselected]) .tab-label {
       color:color-mix(in srgb,currentColor 72%,transparent)!important;
     }
+    .zen-essentials-container[ztt-drop-essential] { outline:1px solid color-mix(in srgb,currentColor 24%,transparent); outline-offset:-2px; }
+    .zen-essentials-container .tabbrowser-tab[zen-essential] {
+      --tab-min-height:38px!important; min-height:38px!important; height:38px!important; max-height:38px!important;
+    }
     .tabbrowser-tab[zen-essential][ztt-initial] {
       position:relative;
-      & .tab-icon-stack { visibility:hidden!important; }
+      & .tab-icon-stack, & .tab-icon-image { display:none!important; }
       &::after { content:attr(ztt-initial); position:absolute; inset:0; display:grid;
         place-items:center; pointer-events:none; font-size:15px; font-weight:600; }
     }
