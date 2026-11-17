@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.8
+// @version        0.14.10
 // ==/UserScript==
 (() => {
   'use strict';
@@ -490,6 +490,7 @@
         if (contents(item).some(isFolder) || item.isLiveFolder) return;
         const tabs=[...item.tabs].filter(isTab), name=uniqueName(strip,(item.label||'New Group').slice(0,60));
         await item.unpackTabs();
+        getState(strip).revealed.add(name);
         let slot=dest;
         for (const tab of tabs) {
           if (tab.pinned) gBrowser.unpinTab(tab);
@@ -836,6 +837,24 @@
   }
   const style = node('style');
   style.textContent = `
+    #tabbrowser-tabs {
+      --ztt-playing-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-3.0%22%20width%3D%222%22%20height%3D%226%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-3.0%3B-1%3B-3.0%22%20dur%3D%220.62s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%226%3B2%3B6%22%20dur%3D%220.62s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-5.5%22%20width%3D%222%22%20height%3D%2211%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-5.5%3B-1%3B-5.5%22%20dur%3D%220.69s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%2211%3B2%3B11%22%20dur%3D%220.69s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-4.0%22%20width%3D%222%22%20height%3D%228%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-4.0%3B-1%3B-4.0%22%20dur%3D%220.76s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%228%3B2%3B8%22%20dur%3D%220.76s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-6.5%22%20width%3D%222%22%20height%3D%2213%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-6.5%3B-1%3B-6.5%22%20dur%3D%220.8300000000000001s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%2213%3B2%3B13%22%20dur%3D%220.8300000000000001s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-3.5%22%20width%3D%222%22%20height%3D%227%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-3.5%3B-1%3B-3.5%22%20dur%3D%220.9s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%227%3B2%3B7%22%20dur%3D%220.9s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+      --ztt-muted-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+    }
+    @media (prefers-reduced-motion:reduce) {
+      #tabbrowser-tabs { --ztt-playing-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-3.0%22%20width%3D%222%22%20height%3D%226%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-5.5%22%20width%3D%222%22%20height%3D%2211%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-4.0%22%20width%3D%222%22%20height%3D%228%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-6.5%22%20width%3D%222%22%20height%3D%2213%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-3.5%22%20width%3D%222%22%20height%3D%227%22%20rx%3D%221%22%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E"); }
+    }
+    #tabbrowser-tabs :is(.tab-audio-button,.tab-icon-overlay)[soundplaying] { --ztt-audio-icon:var(--ztt-playing-icon); }
+    #tabbrowser-tabs :is(.tab-audio-button,.tab-icon-overlay)[muted] { --ztt-audio-icon:var(--ztt-muted-icon); }
+    #tabbrowser-tabs .tab-audio-button:not([crashed]):is([soundplaying],[muted])::part(button) {
+      background-image:var(--ztt-audio-icon)!important; background-size:16px 16px!important;
+      background-position:center!important; background-repeat:no-repeat!important;
+      -moz-context-properties:fill!important; fill:currentColor!important;
+    }
+    #tabbrowser-tabs .tab-icon-overlay:not([crashed]):is([soundplaying],[muted]) {
+      list-style-image:var(--ztt-audio-icon)!important; -moz-context-properties:fill!important;
+    }
+
     #browser #tabbrowser-tabbox { box-shadow:0 0 5px rgb(0 0 0 / .065); }
     @media (prefers-reduced-motion:no-preference) {
       zen-folder:not([collapsed]) > .tab-group-container { animation:ztt-folder-open 135ms ease-out; }
