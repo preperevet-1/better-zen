@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.15
+// @version        0.14.16
 // ==/UserScript==
 (() => {
   'use strict';
@@ -977,7 +977,7 @@
       .zen-media-card {
         box-sizing:border-box!important; height:auto!important; min-height:0!important;
         --progress-row:0px; --buttons-row:0px; --controls-opacity:0;
-        &:is(:hover,:focus-within) { --progress-row:20px; --buttons-row:26px; --controls-opacity:1; }
+        &:is(:hover,:focus-within) { --progress-row:28px; --buttons-row:26px; --controls-opacity:1; }
       }
       .zen-media-main-vbox {
         grid-template-rows:auto var(--progress-row) var(--buttons-row)!important;
@@ -985,7 +985,7 @@
         transition:grid-template-rows 155ms cubic-bezier(.2,.8,.2,1)!important;
       }
       .zen-media-progress-hbox {
-        align-self:center; height:100%!important; min-height:0!important; margin:0!important;
+        align-self:center; transform:translateY(4px); height:100%!important; min-height:0!important; margin:0!important;
         display:flex!important; align-items:center!important; overflow:hidden;
       }
       :is(.zen-media-progress-hbox,.zen-media-pip-button,.zen-media-close-button,.zen-media-previoustrack-button,.zen-media-playpause-button,.zen-media-nexttrack-button) {
@@ -1004,9 +1004,14 @@
       .toolbarbutton-1:is(:hover,:active) > .toolbarbutton-icon { background-color:transparent!important; box-shadow:none!important; }
       .zen-media-playpause-button { margin-inline:3px!important; }
       :is(.zen-media-nexttrack-button,.zen-media-previoustrack-button):is(:disabled,[disabled],[aria-disabled="true"]) { opacity:calc(var(--controls-opacity) * .32)!important; }
-      .zen-media-pip-button > .toolbarbutton-icon {
-        list-style-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2.5' width='14' height='11' rx='1.5' fill='none' stroke='context-fill'/%3E%3Crect x='8' y='7' width='5.5' height='5' rx='.7' fill='context-fill'/%3E%3C/svg%3E")!important;
-        -moz-context-properties:fill; fill:currentColor; border-radius:0!important;
+      .zen-media-pip-button {
+        position:relative;
+        & > .toolbarbutton-icon { opacity:0!important; }
+        &::after {
+          content:""; position:absolute; inset:0; margin:auto; width:16px; height:16px;
+          pointer-events:none; background-color:currentColor;
+          mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2.5' width='14' height='11' rx='1.5' fill='none' stroke='black' stroke-width='1.5'/%3E%3Crect x='8' y='7' width='5' height='4.5' rx='.6'/%3E%3C/svg%3E") center/contain no-repeat;
+        }
       }
       .zen-media-notes { display:none!important; }
     }
@@ -1326,9 +1331,7 @@
     function positionMenu() {
       const plus = document.getElementById('zen-create-new-button');
       if (!plus || !panel.matches(':popover-open')) return;
-      const {button}=footerGeometry();
-        const bar=footer.getBoundingClientRect();
-        const width=Math.max(1,bar.width-8), left=bar.left+4;
+      const {button,width,left}=footerGeometry();
       panel.style.width = width+'px';
       panel.style.left = left+'px';
       panel.style.transformOrigin = (button.left + button.width/2 - left)+'px bottom';
