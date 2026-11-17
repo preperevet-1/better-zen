@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.16
+// @version        0.14.18
 // ==/UserScript==
 (() => {
   'use strict';
@@ -861,6 +861,12 @@
       @keyframes ztt-folder-open { from { opacity:.3; clip-path:inset(0 0 90% 0); } to { opacity:1; clip-path:inset(0); } }
     }
 
+    #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]) .tab-icon-stack {
+      display:none!important;
+    }
+    #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]) .tab-content {
+      padding-inline-start:12px!important;
+    }
     #tabbrowser-tabs tab[zen-essential] :is(.tab-audio-button,.tab-icon-overlay:is([soundplaying],[muted]):not([crashed],[activemedia-blocked])) { display:none!important; }
     #tabbrowser-tabs tab[zen-essential]:is([soundplaying],[muted]) .tab-icon-image { opacity:1!important; visibility:visible!important; }
     #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]) .tab-audio-button {
@@ -998,21 +1004,12 @@
         justify-self:center; align-self:center; box-sizing:border-box!important;
         width:26px!important; height:26px!important; min-width:0!important; min-height:0!important;
         padding:0!important; margin:0!important; justify-content:center!important; align-items:center!important;
-        & > .toolbarbutton-icon { width:16px!important; height:16px!important; padding:0!important; object-fit:contain; }
+        &:not(.zen-media-pip-button) > .toolbarbutton-icon { width:16px!important; height:16px!important; padding:0!important; object-fit:contain; }
       }
       @media(prefers-reduced-motion:reduce) { .zen-media-main-vbox, .zen-media-main-vbox * { transition:none!important; } }
       .toolbarbutton-1:is(:hover,:active) > .toolbarbutton-icon { background-color:transparent!important; box-shadow:none!important; }
       .zen-media-playpause-button { margin-inline:3px!important; }
       :is(.zen-media-nexttrack-button,.zen-media-previoustrack-button):is(:disabled,[disabled],[aria-disabled="true"]) { opacity:calc(var(--controls-opacity) * .32)!important; }
-      .zen-media-pip-button {
-        position:relative;
-        & > .toolbarbutton-icon { opacity:0!important; }
-        &::after {
-          content:""; position:absolute; inset:0; margin:auto; width:16px; height:16px;
-          pointer-events:none; background-color:currentColor;
-          mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2.5' width='14' height='11' rx='1.5' fill='none' stroke='black' stroke-width='1.5'/%3E%3Crect x='8' y='7' width='5' height='4.5' rx='.6'/%3E%3C/svg%3E") center/contain no-repeat;
-        }
-      }
       .zen-media-notes { display:none!important; }
     }
     :root:has(#ztt-create-panel:popover-open) #zen-media-controls-toolbar { visibility:hidden!important; pointer-events:none!important; }
