@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.24
+// @version        0.14.25
 // ==/UserScript==
 (() => {
   'use strict';
@@ -190,12 +190,13 @@
   function installSelectionMenu() {
     const menu = document.getElementById('tabContextMenu');
     const item = document.createXULElement('menuitem');
-    item.setAttribute('label','Group Selected Tabs');
+    item.id='ztt-group-selection';
+    item.setAttribute('label','New Group with Tab');
     const anchor = document.getElementById('context_moveTabToGroup');
     menu.insertBefore(item,anchor?.parentElement === menu ? anchor : menu.firstElementChild);
     function selection(strip) {
-      const tabs = gBrowser.selectedTabs;
-      return strip && !busy && tabs.includes(TabContextMenu.contextTab) && tabs.length >= 2 &&
+      const tabs = TabContextMenu.contextTab?.multiselected ? gBrowser.selectedTabs : [TabContextMenu.contextTab];
+      return strip && !busy && tabs.includes(TabContextMenu.contextTab) && tabs.length >= 1 &&
         tabs.every(tab => eligible(tab,strip)) ? tabs : [];
     }
     menu.addEventListener('popupshowing',event => {
@@ -508,7 +509,12 @@
         // intact; ordinary folders convert to temporary groups below the divider.
         if (contents(item).some(isFolder) || item.isLiveFolder) return;
         const tabs=[...item.tabs].filter(isTab), name=uniqueName(strip,(item.label||'New Group').slice(0,60));
-        await item.unpackTabs();
+        // Ungroup existing children in place. Expanding the folder can select
+        // and restore its first pending child before the conversion finishes.
+        for (const child of [...item.allItems].reverse()) {
+          if (child.hasAttribute('zen-empty-tab')) gBrowser.removeTab(child);
+          else gBrowser.ungroupTab(child);
+        }
         getState(strip).revealed.add(name);
         let slot=dest;
         for (const tab of tabs) {
@@ -931,8 +937,17 @@
       content:""; flex:none; width:12px; height:12px; box-sizing:border-box;
       align-self:center; margin-inline:5px; border:2px solid currentColor;
       border-inline-start-color:transparent; border-radius:50%; opacity:.55; pointer-events:none;
-      animation:ztt-tab-spin 750ms linear infinite;
+      animation:ztt-tab-spin 920ms linear infinite; will-change:transform;
     }
+    #tabContextMenu > [ztt-omit] { display:none!important; }
+    #tabbrowser-tabs[expanded] .tabbrowser-tab[busy]:not([zen-essential]) :is(.tab-reset-button,.tab-reset-pin-button,.tab-close-button) { display:none!important; }
+    .ztt-action-tip:popover-open { display:flex; align-items:center; gap:3px; position:fixed; inset:auto; margin:0; pointer-events:none;
+      padding:4px 8px; border:none; border-radius:16px; color:CanvasText;
+      background:color-mix(in srgb,Canvas 94%,var(--zen-primary-color,AccentColor)); box-shadow:0 2px 10px #0003;
+      font:500 12px system-ui; }
+    .ztt-action-tip kbd { font:600 10px system-ui; padding:1px 4px; border-radius:4px;
+      color:color-mix(in srgb,CanvasText 65%,var(--zen-primary-color,AccentColor)); border:1px solid currentColor;
+      background:color-mix(in srgb,currentColor 9%,transparent); }
     @keyframes ztt-tab-spin { to { transform:rotate(1turn); } }
     @media(prefers-reduced-motion:reduce) {
       #tabbrowser-tabs[expanded] .tabbrowser-tab[busy] .tab-content::after { animation:none; }
@@ -1496,6 +1511,7 @@
       tab.removeAttribute('ztt-has-controller');
     }
     function sync(tab) {
+      if (!tab.linkedPanel || tab.matches('[pending],[zen-unloaded],[discarded]')) { release(tab); return; }
       const controller = tab.linkedBrowser?.browsingContext?.mediaController;
       if (controller && watched.get(tab)?.controller === controller) return;
       release(tab);
@@ -1516,6 +1532,175 @@
     tabs.addEventListener('TabClose', event => release(event.target), {signal:abort.signal});
     abort.signal.addEventListener('abort', () => { for (const tab of watched.keys()) release(tab); }, {once:true});
     for (const tab of gBrowser.tabs) sync(tab);
+  }
+  function installTabActions() {
+    const menu = document.getElementById('tabContextMenu');
+    const owned = [];
+    function entry(parent, type, id, label) {
+      const el = document.createXULElement(type);
+      if (id) el.id = id;
+      if (label) el.setAttribute('label',label);
+      parent.append(el);
+      if (parent === menu) owned.push(el);
+      return el;
+    }
+    const tab = () => TabContextMenu.contextTab;
+    const targets = () => tab().multiselected ? gBrowser.selectedTabs : [tab()];
+    const copy = entry(menu,'menuitem','ztt-copy','Copy Link');
+    copy.addEventListener('command',() => Cc['@mozilla.org/widget/clipboardhelper;1'].getService(Ci.nsIClipboardHelper).copyString(targets().map(t => t.linkedBrowser.currentURI.spec).join('\n')));
+    const unload = entry(menu,'menuitem','ztt-unload','Unload Tab');
+    unload.addEventListener('command',() => gBrowser.explicitUnloadTabs(targets()));
+    const profiles = entry(menu,'menu','ztt-profiles','Move to Profile');
+    const profileList = entry(profiles,'menupopup');
+    profileList.addEventListener('popupshowing',async e => {
+      if (e.target !== profileList) return;
+      profileList.replaceChildren();
+      const tabs = [...targets()];
+      const urls = tabs.map(t => t.linkedBrowser.currentURI.spec);
+      try {
+        const {SelectableProfileService:service} = ChromeUtils.importESModule('resource:///modules/profiles/SelectableProfileService.sys.mjs');
+        if (service.currentProfile && urls.every(url => /^https?:/i.test(url))) {
+          for (const profile of await service.getAllProfiles()) {
+            if (profile.id === service.currentProfile.id) continue;
+            const option = entry(profileList,'menuitem',null,profile.name);
+            option.addEventListener('command',async () => {
+              await service.launchInstance(profile,urls);
+              for (const [i,t] of tabs.entries()) {
+                if (t.isConnected && t.linkedBrowser.currentURI.spec === urls[i]) gBrowser.removeTab(t);
+              }
+            });
+          }
+        }
+      } catch (error) { report(error); }
+      if (!profileList.childElementCount) entry(profileList,'menuitem',null,'No available profiles').disabled=true;
+    });
+    const bookmark = entry(menu,'menu','ztt-bookmark-folder','Add Bookmark to Folder');
+    const folders = entry(bookmark,'menupopup');
+    const {PlacesUtils} = ChromeUtils.importESModule('resource://gre/modules/PlacesUtils.sys.mjs');
+    async function fillFolders(popup,guid) {
+      const tree = await PlacesUtils.promiseBookmarksTree(guid,{excludeItemsCallback:item => !!item.uri});
+      popup.replaceChildren();
+      for (const folder of tree?.children || []) {
+        if (!folder.guid || folder.uri || folder.typeCode !== PlacesUtils.bookmarks.TYPE_FOLDER) continue;
+        const option = entry(popup,'menu',null,folder.title);
+        const list = entry(option,'menupopup');
+        const add = entry(list,'menuitem',null,'Add Here');
+        add.addEventListener('command',async () => {
+          for (const t of targets()) await PlacesUtils.bookmarks.insert({parentGuid:folder.guid,url:t.linkedBrowser.currentURI.spec,title:t.label});
+        });
+        const children = folder.children || [];
+        function appendChildFolders(parent,items) {
+          for (const child of items.filter(c => c.typeCode === PlacesUtils.bookmarks.TYPE_FOLDER)) {
+            const sub=entry(parent,'menu',null,child.title), inner=entry(sub,'menupopup');
+            entry(inner,'menuitem',null,'Add Here').addEventListener('command',async () => {
+              for (const t of targets()) await PlacesUtils.bookmarks.insert({parentGuid:child.guid,url:t.linkedBrowser.currentURI.spec,title:t.label});
+            });
+            appendChildFolders(inner,child.children || []);
+          }
+        }
+        appendChildFolders(list,children);
+      }
+    }
+    folders.addEventListener('popupshowing',e => { if (e.target===folders) fillFolders(folders,PlacesUtils.bookmarks.rootGuid).catch(report); });
+    const groups = [
+      ['context_pinTab','context_unpinTab','context_pinSelectedTabs','context_unpinSelectedTabs','context_zen-reset-pinned-tab','context_zen-add-essential','context_zen-remove-essential'],
+      ['context_moveTabToSplitView','context_separateSplitView','context_reverseSplitView','context_duplicateTab','context_duplicateTabs'],
+      ['ztt-group-selection','context_moveTabToGroup','context_ungroupTab','ztt-profiles'],
+      ['context_bookmarkTab','context_bookmarkSelectedTabs','ztt-bookmark-folder'],
+      ['ztt-copy'],
+      ['context_zen-edit-tab-title','context_zen-edit-tab-icon','context_zen-edit-pinned-page','context_toggleMuteTab','context_toggleMuteSelectedTabs'],
+      ['ztt-unload','context_closeTab']
+    ];
+    const original = new Map();
+    function restore() {
+      for (const [el,next] of [...original].reverse()) {
+        menu.insertBefore(el,next?.parentNode===menu ? next : null);
+        el.removeAttribute('ztt-omit');
+      }
+      original.clear();
+      menu.querySelectorAll('.ztt-action-separator').forEach(el => el.remove());
+    }
+    menu.addEventListener('popupshowing',e => {
+      if (e.target!==menu) return;
+      for (const el of menu.children) { original.set(el,el.nextSibling); el.setAttribute('ztt-omit',''); }
+      let first=true;
+      for (const group of groups) {
+        const items=group.map(id=>document.getElementById(id)).filter(el=>el?.parentNode===menu && !el.hidden);
+        if (!items.length) continue;
+        if (!first) {
+          const divider=document.createXULElement('menuseparator');
+          divider.classList.add('ztt-action-separator'); menu.append(divider);
+        }
+        first=false;
+        for (const el of items) { el.removeAttribute('ztt-omit'); menu.append(el); }
+      }
+      profiles.disabled=document.documentElement.hasAttribute('privatebrowsingmode');
+      const shortcuts = {context_closeTab:'key_close',context_duplicateTab:'zen-duplicate-tab',context_pinTab:'zen-toggle-pin-tab',context_unpinTab:'zen-toggle-pin-tab',context_bookmarkTab:'addBookmarkAsKb'};
+      for (const [id,keyId] of Object.entries(shortcuts)) {
+        const command=document.getElementById(id), key=document.getElementById(keyId);
+        if (command && key && !command.hasAttribute('key')) command.setAttribute('key',keyId);
+      }
+      unload.disabled=targets().every(t => !t.linkedPanel || t.hasAttribute('pending'));
+    },{signal:abort.signal});
+    menu.addEventListener('popuphidden',e=>{if(e.target===menu) restore();},{signal:abort.signal});
+    abort.signal.addEventListener('abort',()=>{restore();owned.forEach(el=>el.remove());},{once:true});
+  }
+  function installActionTips() {
+    const tip=node('div','ztt-action-tip');
+    tip.setAttribute('popover','manual'); tip.setAttribute('role','tooltip');
+    document.documentElement.append(tip);
+    const rules=[
+      ['.zen-glance-sidebar-close,.tab-close-button','Close','key_close'],
+      ['.zen-glance-sidebar-open','Expand','zen-glance-expand'],
+      ['#zen-expand-sidebar-button','Toggle sidebar','zen-toggle-sidebar'],
+      ['#zen-library-button','View Library','zen-library-toggle'],
+      ['#zen-workspaces-button [zen-workspace-id]','',''],
+      ['#zen-create-new-button','Create','']
+    ];
+    let anchor, timer;
+    function hide() { clearTimeout(timer); anchor=null; if(tip.matches(':popover-open')) tip.hidePopover(); }
+    function hover(e) {
+      const path=e.composedPath();
+      for (const [selector,label,keyId] of rules) {
+        const el=path.find(n=>n.matches?.(selector));
+        if (!el) continue;
+        if(el===anchor) return;
+        hide(); anchor=el;
+        timer=setTimeout(()=>{
+          if (!el.isConnected) return hide();
+          const workspace=el.getAttribute('zen-workspace-id');
+          const spaces=gZenWorkspaces.getWorkspaces();
+          const index=workspace ? spaces.findIndex(s=>s.uuid===workspace) : -1;
+          tip.replaceChildren(node('span','',index>=0 ? spaces[index].name : label));
+          const key=document.getElementById(index>=0 ? 'zen-workspace-switch-'+(index+1) : keyId);
+          const letter=key?.getAttribute('key');
+          if(letter && !key.disabled) {
+            const mac=AppConstants.platform==='macosx';
+            const mods={accel:mac?'⌘':'Ctrl',shift:mac?'⇧':'Shift',alt:mac?'⌥':'Alt',control:mac?'⌃':'Ctrl',meta:'⌘'};
+            for(const mod of (key.getAttribute('modifiers')||'').split(/[ ,]+/).filter(Boolean))
+              tip.append(node('kbd','',mods[mod]||mod));
+            tip.append(node('kbd','',letter.toUpperCase()));
+          }
+          tip.showPopover();
+          const r=el.getBoundingClientRect(), w=tip.offsetWidth, h=tip.offsetHeight;
+          if (el.matches('.zen-glance-sidebar-close,.zen-glance-sidebar-open') && r.right+w+8<innerWidth) {
+            tip.style.left=(r.right+5)+'px';
+            tip.style.top=Math.max(4,r.top+(r.height-h)/2)+'px';
+            return;
+          }
+          tip.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+(r.width-w)/2))+'px';
+          tip.style.top=(r.bottom+h+8<innerHeight ? r.bottom+5 : r.top-h-5)+'px';
+        },360);
+        return;
+      }
+      hide();
+    }
+    const opts={capture:true,signal:abort.signal};
+    window.addEventListener('pointerover',hover,opts);
+    window.addEventListener('pointerout',e=>{if(anchor && !anchor.contains(e.relatedTarget)) hide();},opts);
+    for(const event of ['pointerdown','keydown','dragstart','blur']) window.addEventListener(event,hide,opts);
+    window.addEventListener('popupshowing',e=>{if(anchor && e.target.localName==='tooltip') e.preventDefault();},opts);
+    abort.signal.addEventListener('abort',()=>{hide();tip.remove();},{once:true});
   }
   function installPlayerSettings() {
     const pref = 'zen-tidy-tabs.show-mini-player';
@@ -1599,6 +1784,8 @@
     installInsertionHook();
     installSidebarMotion();
     installSelectionMenu();
+    installTabActions();
+    installActionTips();
     for (const event of ['SSTabRestored','SSTabRestoring','TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
       gBrowser.tabContainer.addEventListener(event, schedule, { signal:abort.signal });
     }
