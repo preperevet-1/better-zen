@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.22
+// @version        0.14.23
 // ==/UserScript==
 (() => {
   'use strict';
@@ -275,6 +275,8 @@
       return originalFolderPopup.apply(this,args);
     };
     gZenFolders.openTabsPopup = guardedFolderPopup;
+    const essentialSlot=document.createXULElement('vbox');
+    essentialSlot.className='ztt-essential-slot';
     const blank = node('div','ztt-drag-blank');
     document.documentElement.append(blank);
     const listen = (type,fn) => window.addEventListener(type,fn,{capture:true,signal:abort.signal});
@@ -320,6 +322,7 @@
       return rows;
     }
     function removeTransforms(session) {
+      session.source.item.removeAttribute('ztt-slot-preview');
       for (const r of session.rows) for (const el of r.nodes) {
         el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
         el.style.removeProperty('--ztt-drag-y');
@@ -341,7 +344,7 @@
     }
     function clear() {
       cancelAnimationFrame(frame); frame=0;
-      active?.essentialContainer?.removeAttribute('ztt-drop-essential');
+      essentialSlot.remove();
       if (active) removeTransforms(active);
       previewFolder(null);
       active=null; sidebarDragging=false;
@@ -359,7 +362,7 @@
     }
     function target() {
       const a=active, {strip,rows,y,source,pins}=a;
-      if (source.kind==='tab' && a.essentials && y>=a.essentials.top && y<a.essentials.bottom)
+      if (source.kind==='tab' && a.essentials && y>=a.essentials.top && y<Math.max(a.essentials.bottom,a.essentialContainer.getBoundingClientRect().bottom) && (source.item.hasAttribute('zen-essential') || gZenPinnedTabManager.canEssentialBeAdded(source.item)))
         return {kind:'essential',container:a.essentialContainer};
       const separator=getState(strip).separator;
       const boundary=a.boundary;
@@ -414,7 +417,13 @@
       frame=0;
       if (!active) return;
       const a=active, dest=target();
-      a.essentialContainer?.toggleAttribute('ztt-drop-essential',dest.kind==='essential');
+      if (dest.kind==='essential' && !a.source.item.hasAttribute('zen-essential')) {
+        if (!essentialSlot.isConnected) {
+          const host=URL.parse(a.source.item.linkedBrowser?.currentURI?.spec || '')?.hostname.replace(/^www\./i,'');
+          essentialSlot.textContent=Array.from(host || a.source.item.label || '•')[0].toLocaleUpperCase();
+          a.essentialContainer.append(essentialSlot);
+        }
+      } else essentialSlot.remove();
       const dy=Math.max(a.top-a.origin,Math.min(a.bottom-a.origin-a.height,a.y-a.startY));
       const intoFolder=a.source.kind==='tab' && Boolean(dest.folder || dest.topic);
       // Preview and commit use the same slot. A separate threshold for the
@@ -425,6 +434,7 @@
         ref=a.rows.find(r=>r.kind==='header'&&r.topic===ref.topic)||ref;
       }
       const gap=ref ? (dest.after?ref.bottom:ref.top) : (dest.kind==='normal'?a.strip.getBoundingClientRect().bottom:a.pins.getBoundingClientRect().bottom);
+      a.source.item.toggleAttribute('ztt-slot-preview',essentialSlot.isConnected);
       for (const r of a.rows) {
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
@@ -597,11 +607,15 @@
       const a=active, dest=valid?target():null;
       previewFolder(null);
       const before=new Map(a.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
-      cancelAnimationFrame(frame); frame=0; removeTransforms(a); a.essentialContainer?.removeAttribute('ztt-drop-essential'); active=null;
+      cancelAnimationFrame(frame); frame=0; removeTransforms(a); essentialSlot.remove(); active=null;
       finishing=true;
       try {
-        if (dest) await commit(a,dest);
-        if (!matchMedia('(prefers-reduced-motion:reduce)').matches) for (const [el,top] of before) if (el.isConnected) {
+        const converting=a.source.kind==='folder' && dest?.kind==='normal';
+        const previousMin=a.pins?.style.minHeight;
+        if (converting && a.pins) a.pins.style.minHeight=a.pins.getBoundingClientRect().height+'px';
+        try { if (dest) await commit(a,dest); }
+        finally { if (converting && a.pins) a.pins.style.minHeight=previousMin; }
+        if (!converting && !matchMedia('(prefers-reduced-motion:reduce)').matches) for (const [el,top] of before) if (el.isConnected) {
           const delta=top-el.getBoundingClientRect().top;
           if (delta) el.animate([{translate:'0 '+delta+'px'},{translate:'0 0'}],{duration:160,easing:'cubic-bezier(.2,.8,.2,1)'});
         }
@@ -886,15 +900,18 @@
       display:none!important;
     }
     #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]) .tab-content {
-      padding-inline-start:15px!important;
+      padding-inline-start:15px!important; transition:padding-inline-start 220ms ease 180ms;
     }
     #tabbrowser-tabs[expanded] .tabbrowser-tab:not([zen-essential]):is([ztt-playing], [soundplaying]:not([ztt-has-controller]),[activemedia-blocked]) .tab-content {
-      padding-inline-start:10px!important;
+      padding-inline-start:10px!important; transition-delay:0s;
     }
     .tabbrowser-tab:is([pending],[discarded],[zen-unloaded]):not([selected],[visuallyselected]) .tab-label {
       color:color-mix(in srgb,currentColor 72%,transparent)!important;
     }
-    .zen-essentials-container[ztt-drop-essential] { outline:1px solid color-mix(in srgb,currentColor 24%,transparent); outline-offset:-2px; }
+    .ztt-essential-slot { height:38px; display:grid; place-items:center; pointer-events:none;
+      background:var(--zen-toolbar-element-bg); border-radius:var(--border-radius-medium);
+      font-size:13.5px; font-weight:500; }
+    [ztt-slot-preview] { opacity:0!important; }
     .zen-essentials-container .tabbrowser-tab[zen-essential] {
       --tab-min-height:38px!important; min-height:38px!important; height:38px!important; max-height:38px!important;
     }
@@ -902,7 +919,7 @@
       position:relative;
       & .tab-icon-stack, & .tab-icon-image { display:none!important; }
       &::after { content:attr(ztt-initial); position:absolute; inset:0; display:grid;
-        place-items:center; padding-block-start:2px; box-sizing:border-box; line-height:1; pointer-events:none; font-size:15px; font-weight:600; }
+        place-items:center; padding-block-start:2px; box-sizing:border-box; line-height:1; pointer-events:none; font-size:13.5px; font-weight:500; }
     }
     .tabbrowser-tab[zen-essential]:not([selected],[visuallyselected])::after {
       color:light-dark(#929292,#aaa);
@@ -931,7 +948,7 @@
     #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]) .tab-audio-button {
       display:flex!important; overflow:hidden; min-inline-size:0!important; flex:none!important;
       inline-size:0!important; margin-inline:0!important; opacity:0; visibility:hidden;
-      transition:inline-size 160ms ease,margin-inline-end 160ms ease,opacity 140ms ease,visibility 0s 160ms;
+      transition:inline-size 220ms ease 180ms,margin-inline-end 220ms ease 180ms,opacity 160ms ease 180ms,visibility 0s 400ms;
     }
     #tabbrowser-tabs[expanded] tab:not([zen-essential],[crashed]):is([ztt-playing], [soundplaying]:not([ztt-has-controller]),[activemedia-blocked]) .tab-audio-button {
       inline-size:var(--tab-content-button-size,16px)!important; margin-inline-end:9px!important;
@@ -1149,7 +1166,7 @@
     :is(#back-button,#forward-button,#reload-button) > .toolbarbutton-icon {
       position:relative; background:transparent!important; }
     :root[zen-single-toolbar="true"] .zen-essentials-container:not(:empty) {
-      padding-block:8px!important; }
+      padding-block:5px 8px!important; }
     :is(#back-button,#forward-button,#reload-button,#stop-button) > .toolbarbutton-icon {
       border-radius:11px!important; corner-shape:squircle; }
     #zen-workspaces-button toolbarbutton[zen-workspace-id]:hover {
