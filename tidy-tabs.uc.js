@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.23
+// @version        0.14.24
 // ==/UserScript==
 (() => {
   'use strict';
@@ -1094,6 +1094,7 @@
       :is(.zen-media-nexttrack-button,.zen-media-previoustrack-button):is(:disabled,[disabled],[aria-disabled="true"]) { opacity:calc(var(--controls-opacity) * .32)!important; }
       .zen-media-notes { display:none!important; }
     }
+    :root[ztt-hide-player] #zen-media-controls-toolbar { display:none!important; }
     :root:has(#ztt-create-panel:popover-open) #zen-media-controls-toolbar { visibility:hidden!important; pointer-events:none!important; }
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
@@ -1516,6 +1517,73 @@
     abort.signal.addEventListener('abort', () => { for (const tab of watched.keys()) release(tab); }, {once:true});
     for (const tab of gBrowser.tabs) sync(tab);
   }
+  function installPlayerSettings() {
+    const pref = 'zen-tidy-tabs.show-mini-player';
+    const refresh = () => document.documentElement.toggleAttribute('ztt-hide-player', !Services.prefs.getBoolPref(pref,true));
+    Services.prefs.addObserver(pref,refresh);
+    refresh();
+
+    function attach(doc) {
+      if (doc.documentElement.getAttribute('windowtype') !== 'Zen:Settings') return;
+      const list = doc.getElementById('zen-settings-categories');
+      const panes = doc.getElementById('zen-settings-panes');
+      if (!list || !panes || doc.getElementById('ztt-settings-pane')) return;
+      const win = doc.defaultView;
+      const make = (tag, cls) => {
+        const el = doc.createElementNS(NS,tag);
+        el.className = cls;
+        return el;
+      };
+      const category = list.querySelector('[data-pane="advanced"]').cloneNode(true);
+      category.dataset.pane = 'ztt';
+      category.tabIndex = -1;
+      category.setAttribute('aria-selected','false');
+      category.setAttribute('aria-controls','ztt-settings-pane');
+      category.id = 'ztt-settings-category';
+      // Zen reads a Fluent key from every category when switching panes.
+      category.querySelector('[data-l10n-id]').hidden = true;
+      category.append('Zen Tidy Tabs');
+      list.append(category);
+      const pane = make('section','zen-settings-pane');
+      pane.id = 'ztt-settings-pane';
+      pane.hidden = true;
+      pane.dataset.pane = 'ztt';
+      pane.setAttribute('role','tabpanel');
+      pane.setAttribute('aria-labelledby',category.id);
+      const card = make('div','zen-settings-card');
+      const row = make('div','zen-settings-row zen-settings-toggle-row');
+      const text = make('span','zen-settings-row-text');
+      text.textContent = Services.locale.appLocaleAsBCP47.startsWith('uk') ? 'Показувати мініплеєр' : 'Show mini player';
+      const toggle = make('moz-toggle','zen-settings-toggle');
+      toggle.ariaLabel = text.textContent;
+      toggle.pressed = Services.prefs.getBoolPref(pref,true);
+      toggle.addEventListener('toggle',() => Services.prefs.setBoolPref(pref,toggle.pressed));
+      row.append(text,toggle);
+      card.append(row);
+      pane.append(card);
+      panes.append(pane);
+      const titleObserver = new win.MutationObserver(() => {
+        if (doc.documentElement.dataset.pane !== 'ztt') return;
+        const title = doc.getElementById('zen-settings-title');
+        title.removeAttribute('data-l10n-id');
+        title.textContent = 'Zen Tidy Tabs';
+      });
+      titleObserver.observe(doc.documentElement,{attributes:true,attributeFilter:['data-pane']});
+      win.addEventListener('unload',() => titleObserver.disconnect(),{once:true});
+    }
+    const opened = doc => {
+      if (doc.documentElement.getAttribute('windowtype') === 'Zen:Settings')
+        attach(doc);
+    };
+    Services.obs.addObserver(opened,'chrome-document-loaded');
+    for (const win of Services.wm.getEnumerator('Zen:Settings')) attach(win.document);
+    abort.signal.addEventListener('abort',() => {
+      Services.obs.removeObserver(opened,'chrome-document-loaded');
+      Services.prefs.removeObserver(pref,refresh);
+      document.documentElement.removeAttribute('ztt-hide-player');
+    },{once:true});
+  }
+
   function init() {
     if (destroyed) return;
     if (!window.gBrowser || !window.gZenWorkspaces) { startupTimer = setTimeout(init, 250); return; }
@@ -1524,6 +1592,7 @@
     Services.prefs.setBoolPref('zen.splitView.enable-drag-over-split',false);
     Services.prefs.setBoolPref('zen.pinned-tab-manager.restore-pinned-tabs-to-pinned-url',true);
     gBrowser.tabContainer.tabDragAndDrop._clearDragOverSplit?.();
+    installPlayerSettings();
     installPlaybackIndicators();
     installPinnedBehavior();
     installCreateMenu();
