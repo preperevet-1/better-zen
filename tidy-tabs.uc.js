@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.25
+// @version        0.14.26
 // ==/UserScript==
 (() => {
   'use strict';
@@ -537,6 +537,8 @@
       const source=sourceFor(event), strip=activeStrip(), workspace=gZenWorkspaces.activeWorkspaceElement;
       const essentialContainer=gZenWorkspaces.getCurrentEssentialsContainer?.();
       if (!source || !strip || !(workspace.contains(source.item) || essentialContainer?.contains(source.item))) return;
+      // Zen owns tile reordering and moves originating in the Essentials grid.
+      if (source.item.hasAttribute('zen-essential')) return;
       // Own all supported sources, including labels and tabs inside folders.
       // Cancel unsupported actions instead of falling back to a second engine.
       event.stopImmediatePropagation();
@@ -936,18 +938,18 @@
     #tabbrowser-tabs[expanded] .tabbrowser-tab[busy]:not([zen-essential]) .tab-content::after {
       content:""; flex:none; width:12px; height:12px; box-sizing:border-box;
       align-self:center; margin-inline:5px; border:2px solid currentColor;
-      border-inline-start-color:transparent; border-radius:50%; opacity:.55; pointer-events:none;
-      animation:ztt-tab-spin 920ms linear infinite; will-change:transform;
+      color:var(--zen-primary-color,AccentColor); border-inline-start-color:transparent; border-radius:50%; opacity:.55; pointer-events:none;
+      animation:ztt-tab-spin 1.65s linear infinite; will-change:transform;
     }
     #tabContextMenu > [ztt-omit] { display:none!important; }
     #tabbrowser-tabs[expanded] .tabbrowser-tab[busy]:not([zen-essential]) :is(.tab-reset-button,.tab-reset-pin-button,.tab-close-button) { display:none!important; }
     .ztt-action-tip:popover-open { display:flex; align-items:center; gap:3px; position:fixed; inset:auto; margin:0; pointer-events:none;
-      padding:4px 8px; border:none; border-radius:16px; color:CanvasText;
+      padding:5px 10px; border:none; border-radius:18px; color:CanvasText;
       background:color-mix(in srgb,Canvas 94%,var(--zen-primary-color,AccentColor)); box-shadow:0 2px 10px #0003;
-      font:500 12px system-ui; }
-    .ztt-action-tip kbd { font:600 10px system-ui; padding:1px 4px; border-radius:4px;
+      font:600 13px system-ui; }
+    .ztt-action-tip kbd { font:650 11px system-ui; min-width:18px; line-height:17px; text-align:center; box-sizing:border-box; padding:0 4px; border-bottom-width:2px; border-radius:4px;
       color:color-mix(in srgb,CanvasText 65%,var(--zen-primary-color,AccentColor)); border:1px solid currentColor;
-      background:color-mix(in srgb,currentColor 9%,transparent); }
+      border-bottom-width:2px; background:color-mix(in srgb,currentColor 13%,transparent); }
     @keyframes ztt-tab-spin { to { transform:rotate(1turn); } }
     @media(prefers-reduced-motion:reduce) {
       #tabbrowser-tabs[expanded] .tabbrowser-tab[busy] .tab-content::after { animation:none; }
@@ -1603,9 +1605,9 @@
     }
     folders.addEventListener('popupshowing',e => { if (e.target===folders) fillFolders(folders,PlacesUtils.bookmarks.rootGuid).catch(report); });
     const groups = [
-      ['context_pinTab','context_unpinTab','context_pinSelectedTabs','context_unpinSelectedTabs','context_zen-reset-pinned-tab','context_zen-add-essential','context_zen-remove-essential'],
-      ['context_moveTabToSplitView','context_separateSplitView','context_reverseSplitView','context_duplicateTab','context_duplicateTabs'],
-      ['ztt-group-selection','context_moveTabToGroup','context_ungroupTab','ztt-profiles'],
+      ['context_pinTab','context_unpinTab','context_pinSelectedTabs','context_unpinSelectedTabs','context_zen-reset-pinned-tab'],
+      ['context_zenSplitTabs','context_duplicateTab','context_duplicateTabs'],
+      ['ztt-group-selection','ztt-profiles'],
       ['context_bookmarkTab','context_bookmarkSelectedTabs','ztt-bookmark-folder'],
       ['ztt-copy'],
       ['context_zen-edit-tab-title','context_zen-edit-tab-icon','context_zen-edit-pinned-page','context_toggleMuteTab','context_toggleMuteSelectedTabs'],
@@ -1613,7 +1615,8 @@
     ];
     const original = new Map();
     function restore() {
-      for (const [el,next] of [...original].reverse()) {
+      for (const [el,[next,hidden]] of [...original].reverse()) {
+        el.hidden=hidden;
         menu.insertBefore(el,next?.parentNode===menu ? next : null);
         el.removeAttribute('ztt-omit');
       }
@@ -1622,7 +1625,7 @@
     }
     menu.addEventListener('popupshowing',e => {
       if (e.target!==menu) return;
-      for (const el of menu.children) { original.set(el,el.nextSibling); el.setAttribute('ztt-omit',''); }
+      for (const el of menu.children) { original.set(el,[el.nextSibling,el.hidden]); el.setAttribute('ztt-omit',''); }
       let first=true;
       for (const group of groups) {
         const items=group.map(id=>document.getElementById(id)).filter(el=>el?.parentNode===menu && !el.hidden);
@@ -1634,6 +1637,7 @@
         first=false;
         for (const el of items) { el.removeAttribute('ztt-omit'); menu.append(el); }
       }
+      for (const el of menu.querySelectorAll(':scope > [ztt-omit]')) el.hidden=true;
       profiles.disabled=document.documentElement.hasAttribute('privatebrowsingmode');
       const shortcuts = {context_closeTab:'key_close',context_duplicateTab:'zen-duplicate-tab',context_pinTab:'zen-toggle-pin-tab',context_unpinTab:'zen-toggle-pin-tab',context_bookmarkTab:'addBookmarkAsKb'};
       for (const [id,keyId] of Object.entries(shortcuts)) {
@@ -1655,23 +1659,41 @@
       ['#zen-expand-sidebar-button','Toggle sidebar','zen-toggle-sidebar'],
       ['#zen-library-button','View Library','zen-library-toggle'],
       ['#zen-workspaces-button [zen-workspace-id]','',''],
-      ['#zen-create-new-button','Create','']
+      ['#zen-create-new-button','Create',''],
+      ['#reload-button','Reload current page','key_reload'],
+      ['.tab-audio-button','',''],
+      ['.tabbrowser-tab','',''],
+      ['[tooltiptext],[title],toolbarbutton[aria-label]','','']
     ];
-    let anchor, timer;
-    function hide() { clearTimeout(timer); anchor=null; if(tip.matches(':popover-open')) tip.hidePopover(); }
+    const silent=document.createXULElement('tooltip');
+    silent.id='ztt-silent-tooltip';
+    silent.addEventListener('popupshowing',event=>event.preventDefault());
+    document.documentElement.append(silent);
+    let anchor, timer, previousTooltip;
+    function hide() { clearTimeout(timer);
+      if(anchor?.getAttribute('tooltip')===silent.id) {
+        if(previousTooltip===null) anchor.removeAttribute('tooltip');
+        else anchor.setAttribute('tooltip',previousTooltip);
+      }
+      anchor=null; if(tip.matches(':popover-open')) tip.hidePopover(); }
     function hover(e) {
       const path=e.composedPath();
       for (const [selector,label,keyId] of rules) {
         const el=path.find(n=>n.matches?.(selector));
         if (!el) continue;
         if(el===anchor) return;
+        const caption=label || el.getAttribute('tooltiptext') || el.getAttribute('title') || el.getAttribute('aria-label') || el.label;
+        if(!caption && !el.hasAttribute('zen-workspace-id')) continue;
         hide(); anchor=el;
-        timer=setTimeout(()=>{
+        previousTooltip=el.getAttribute('tooltip');
+        el.setAttribute('tooltip',silent.id);
+        timer=setTimeout(async ()=>{
           if (!el.isConnected) return hide();
-          const workspace=el.getAttribute('zen-workspace-id');
-          const spaces=gZenWorkspaces.getWorkspaces();
+          const workspace=el.closest('#zen-workspaces-button') && el.getAttribute('zen-workspace-id');
+          const spaces=workspace ? await gZenWorkspaces.getWorkspaces() : [];
+          if(anchor!==el) return;
           const index=workspace ? spaces.findIndex(s=>s.uuid===workspace) : -1;
-          tip.replaceChildren(node('span','',index>=0 ? spaces[index].name : label));
+          tip.replaceChildren(node('span','',index>=0 ? spaces[index].name : caption));
           const key=document.getElementById(index>=0 ? 'zen-workspace-switch-'+(index+1) : keyId);
           const letter=key?.getAttribute('key');
           if(letter && !key.disabled) {
@@ -1700,7 +1722,7 @@
     window.addEventListener('pointerout',e=>{if(anchor && !anchor.contains(e.relatedTarget)) hide();},opts);
     for(const event of ['pointerdown','keydown','dragstart','blur']) window.addEventListener(event,hide,opts);
     window.addEventListener('popupshowing',e=>{if(anchor && e.target.localName==='tooltip') e.preventDefault();},opts);
-    abort.signal.addEventListener('abort',()=>{hide();tip.remove();},{once:true});
+    abort.signal.addEventListener('abort',()=>{hide();tip.remove();silent.remove();},{once:true});
   }
   function installPlayerSettings() {
     const pref = 'zen-tidy-tabs.show-mini-player';
