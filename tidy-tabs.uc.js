@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.26
+// @version        0.14.27
 // ==/UserScript==
 (() => {
   'use strict';
@@ -326,6 +326,7 @@
       session.source.item.removeAttribute('ztt-slot-preview');
       for (const r of session.rows) for (const el of r.nodes) {
         el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
+        el.style.removeProperty('--ztt-drag-x');
         el.style.removeProperty('--ztt-drag-y');
         el.style.removeProperty('--ztt-drag-inset');
       }
@@ -364,7 +365,13 @@
     function target() {
       const a=active, {strip,rows,y,source,pins}=a;
       if (source.kind==='tab' && a.essentials && y>=a.essentials.top && y<Math.max(a.essentials.bottom,a.essentialContainer.getBoundingClientRect().bottom) && (source.item.hasAttribute('zen-essential') || gZenPinnedTabManager.canEssentialBeAdded(source.item)))
-        return {kind:'essential',container:a.essentialContainer};
+      {
+        const tile=a.tiles.find(({box})=>y>=box.top && y<box.bottom && a.x>=box.left && a.x<box.right);
+        const after=tile && (source.item.hasAttribute('zen-essential')
+          ? Boolean(source.item.compareDocumentPosition(tile.item) & Node.DOCUMENT_POSITION_FOLLOWING)
+          : a.x>=tile.box.left+tile.box.width/2);
+        return {kind:'essential',container:a.essentialContainer,anchor:tile?.item,after};
+      }
       const separator=getState(strip).separator;
       const boundary=a.boundary;
       const divider=rows.find(row=>row.kind==='separator');
@@ -439,6 +446,7 @@
       for (const r of a.rows) {
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
+            el.style.setProperty('--ztt-drag-x',dest.kind==='essential' && el.hasAttribute('zen-essential') ? (a.x-a.startX)+'px' : '0px');
             el.style.setProperty('--ztt-drag-y',Math.round(dy)+'px');
             el.style.setProperty('--ztt-drag-inset',intoFolder?'5%':'0px');
             el.setAttribute('ztt-lift','');
@@ -446,7 +454,7 @@
           continue;
         }
         const below=r.top>a.origin;
-        const shift=below ? r.top<gap : r.bottom>gap;
+        const shift=dest.kind==='essential' ? false : below ? r.top<gap : r.bottom>gap;
         for (const el of r.nodes) {
           el.style.setProperty('--ztt-drag-y',(shift?(below?-a.pitch:a.pitch):0)+'px');
           el.setAttribute('ztt-slide','');
@@ -480,7 +488,11 @@
       const {source,strip}=a, item=source.item;
       if (source.kind==='tab') {
         if (dest.kind==='essential') {
-          if (!item.hasAttribute('zen-essential') && gZenPinnedTabManager.addToEssentials(item)) membership(item,null,strip);
+          if (!item.hasAttribute('zen-essential')) {
+            if (!gZenPinnedTabManager.addToEssentials(item)) return;
+            membership(item,null,strip);
+          }
+          place(item,dest);
           return;
         }
         if (item.hasAttribute('zen-essential')) gZenPinnedTabManager.removeEssentials(item,dest.kind==='normal');
@@ -537,8 +549,6 @@
       const source=sourceFor(event), strip=activeStrip(), workspace=gZenWorkspaces.activeWorkspaceElement;
       const essentialContainer=gZenWorkspaces.getCurrentEssentialsContainer?.();
       if (!source || !strip || !(workspace.contains(source.item) || essentialContainer?.contains(source.item))) return;
-      // Zen owns tile reordering and moves originating in the Essentials grid.
-      if (source.item.hasAttribute('zen-essential')) return;
       // Own all supported sources, including labels and tabs inside folders.
       // Cancel unsupported actions instead of falling back to a second engine.
       event.stopImmediatePropagation();
@@ -558,6 +568,9 @@
       const rootBox=gBrowser.tabContainer.getBoundingClientRect();
       const pinBox=pins?.getBoundingClientRect(), normalBox=strip.getBoundingClientRect();
       const essentials=essentialContainer?.getBoundingClientRect();
+      active.x=active.startX=event.clientX;
+      active.tiles=Array.from(essentialContainer?.children || []).filter(isTab)
+        .map(item=>({item,box:item.getBoundingClientRect()}));
       active.essentialContainer=essentialContainer;
       if (essentials) active.essentials={top:essentials.top-2,bottom:essentials.top+Math.max(essentials.height,10)};
       active.top=Math.max(Math.min(pinBox?.top??normalBox.top,normalBox.top),essentials?.height?essentials.bottom:0,rootBox.top);
@@ -607,7 +620,7 @@
       event.preventDefault();
       const valid=inside(event);
       event.dataTransfer.dropEffect=valid?'move':'none';
-      active.y=event.clientY;
+      active.x=event.clientX; active.y=event.clientY;
       if (event.type!=='drop') {
         previewFolder(valid?target().folder:null);
         if (!frame) frame=requestAnimationFrame(draw); return;
@@ -637,7 +650,7 @@
     listen('drag',event=>{
       if (!active) return;
       event.stopImmediatePropagation();
-      if (event.clientX||event.clientY) { active.y=event.clientY; if (!frame) frame=requestAnimationFrame(draw); }
+
     });
     listen('dragleave',event=>{if(active)event.stopImmediatePropagation();});
     listen('dragend',event=>{
@@ -938,7 +951,7 @@
     #tabbrowser-tabs[expanded] .tabbrowser-tab[busy]:not([zen-essential]) .tab-content::after {
       content:""; flex:none; width:12px; height:12px; box-sizing:border-box;
       align-self:center; margin-inline:5px; border:2px solid currentColor;
-      color:var(--zen-primary-color,AccentColor); border-inline-start-color:transparent; border-radius:50%; opacity:.55; pointer-events:none;
+      color:color-mix(in srgb,currentColor 76%,var(--zen-primary-color,AccentColor)); border-inline-start-color:transparent; border-radius:50%; opacity:1; pointer-events:none;
       animation:ztt-tab-spin 1.65s linear infinite; will-change:transform;
     }
     #tabContextMenu > [ztt-omit] { display:none!important; }
@@ -947,7 +960,8 @@
       padding:5px 10px; border:none; border-radius:18px; color:CanvasText;
       background:color-mix(in srgb,Canvas 94%,var(--zen-primary-color,AccentColor)); box-shadow:0 2px 10px #0003;
       font:600 13px system-ui; }
-    .ztt-action-tip kbd { font:650 11px system-ui; min-width:18px; line-height:17px; text-align:center; box-sizing:border-box; padding:0 4px; border-bottom-width:2px; border-radius:4px;
+    .ztt-action-tip span + kbd { margin-inline-start:5px; }
+    .ztt-action-tip kbd { font:650 11px system-ui; min-width:19px; line-height:18px; text-align:center; box-sizing:border-box; padding:0 4px; border-bottom-width:2px; border-radius:4px;
       color:color-mix(in srgb,CanvasText 65%,var(--zen-primary-color,AccentColor)); border:1px solid currentColor;
       border-bottom-width:2px; background:color-mix(in srgb,currentColor 13%,transparent); }
     @keyframes ztt-tab-spin { to { transform:rotate(1turn); } }
@@ -1115,7 +1129,7 @@
     :root:has(#ztt-create-panel:popover-open) #zen-media-controls-toolbar { visibility:hidden!important; pointer-events:none!important; }
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
-      transform:translateY(var(--ztt-drag-y,0px))!important; transform-origin:center!important; position:relative!important; }
+      transform:translate(var(--ztt-drag-x,0px),var(--ztt-drag-y,0px))!important; transform-origin:center!important; position:relative!important; }
     #tabbrowser-tabs [ztt-lift] { z-index:40!important; visibility:visible!important; transition:none!important; }
     #tabbrowser-tabs tab[ztt-lift] > .tab-stack {
       box-sizing:border-box!important;
@@ -1660,6 +1674,9 @@
       ['#zen-library-button','View Library','zen-library-toggle'],
       ['#zen-workspaces-button [zen-workspace-id]','',''],
       ['#zen-create-new-button','Create',''],
+      ['#back-button','Go back one page','goBackKb'],
+      ['#forward-button','Go forward one page','goForwardKb'],
+      ['.zen-workspace-close-unpinned-tabs-button','Close all unpinned tabs',''],
       ['#reload-button','Reload current page','key_reload'],
       ['.tab-audio-button','',''],
       ['.tabbrowser-tab','',''],
@@ -1670,12 +1687,21 @@
     silent.addEventListener('popupshowing',event=>event.preventDefault());
     document.documentElement.append(silent);
     let anchor, timer, previousTooltip;
+    const nativeLabels=[];
     function hide() { clearTimeout(timer);
       if(anchor?.getAttribute('tooltip')===silent.id) {
         if(previousTooltip===null) anchor.removeAttribute('tooltip');
         else anchor.setAttribute('tooltip',previousTooltip);
       }
+      for(const [el,name,value] of nativeLabels.splice(0)) {
+        if(!el.hasAttribute(name)) el.setAttribute(name,value);
+      }
       anchor=null; if(tip.matches(':popover-open')) tip.hidePopover(); }
+    function renderCaption(caption) {
+      const match=String(caption).match(/^(.*?)\s*\(([⌘⌃⇧⌥]+)([^()]*)\)([\s\S]*)$/u);
+      tip.replaceChildren(node('span','',match ? match[1]+match[4] : caption));
+      if(match) for(const key of [...match[2],match[3]].filter(Boolean)) tip.append(node('kbd','',key));
+    }
     function hover(e) {
       const path=e.composedPath();
       for (const [selector,label,keyId] of rules) {
@@ -1685,6 +1711,13 @@
         const caption=label || el.getAttribute('tooltiptext') || el.getAttribute('title') || el.getAttribute('aria-label') || el.label;
         if(!caption && !el.hasAttribute('zen-workspace-id')) continue;
         hide(); anchor=el;
+        for(const target of path) {
+          for(const name of ['tooltiptext','title']) if(target.hasAttribute?.(name)) {
+            nativeLabels.push([target,name,target.getAttribute(name)]);
+            target.removeAttribute(name);
+          }
+          if(target===el) break;
+        }
         previousTooltip=el.getAttribute('tooltip');
         el.setAttribute('tooltip',silent.id);
         timer=setTimeout(async ()=>{
@@ -1693,9 +1726,9 @@
           const spaces=workspace ? await gZenWorkspaces.getWorkspaces() : [];
           if(anchor!==el) return;
           const index=workspace ? spaces.findIndex(s=>s.uuid===workspace) : -1;
-          tip.replaceChildren(node('span','',index>=0 ? spaces[index].name : caption));
+          renderCaption(index>=0 ? spaces[index].name : caption);
           const key=document.getElementById(index>=0 ? 'zen-workspace-switch-'+(index+1) : keyId);
-          const letter=key?.getAttribute('key');
+          const letter=key?.getAttribute('key') || ({VK_LEFT:'←',VK_RIGHT:'→'})[key?.getAttribute('keycode')];
           if(letter && !key.disabled) {
             const mac=AppConstants.platform==='macosx';
             const mods={accel:mac?'⌘':'Ctrl',shift:mac?'⇧':'Shift',alt:mac?'⌥':'Alt',control:mac?'⌃':'Ctrl',meta:'⌘'};
@@ -1722,6 +1755,23 @@
     window.addEventListener('pointerout',e=>{if(anchor && !anchor.contains(e.relatedTarget)) hide();},opts);
     for(const event of ['pointerdown','keydown','dragstart','blur']) window.addEventListener(event,hide,opts);
     window.addEventListener('popupshowing',e=>{if(anchor && e.target.localName==='tooltip') e.preventDefault();},opts);
+    // Some chrome controls populate an anonymous tooltip only as it opens.
+    window.addEventListener('popupshowing',event=>{
+      const popup=event.target;
+      if(anchor || popup.localName!=='tooltip' || popup===silent) return;
+      const target=popup.triggerNode || document.tooltipNode;
+      if(!target?.closest?.('#navigator-toolbox,#browser') || target.localName==='browser') return;
+      const caption=popup.getAttribute('label') || target.getAttribute('tooltiptext') ||
+        target.getAttribute('title') || popup.textContent.trim();
+      if(!caption) return;
+      event.preventDefault();
+      anchor=target;
+      renderCaption(caption);
+      tip.showPopover();
+      const box=target.getBoundingClientRect();
+      tip.style.left=Math.max(4,Math.min(innerWidth-tip.offsetWidth-4,box.left))+'px';
+      tip.style.top=(box.bottom+tip.offsetHeight+8<innerHeight ? box.bottom+5 : box.top-tip.offsetHeight-5)+'px';
+    },{signal:abort.signal});
     abort.signal.addEventListener('abort',()=>{hide();tip.remove();silent.remove();},{once:true});
   }
   function installPlayerSettings() {
