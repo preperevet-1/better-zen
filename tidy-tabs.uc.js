@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.27
+// @version        0.14.28
 // ==/UserScript==
 (() => {
   'use strict';
@@ -545,16 +545,23 @@
     });
     listen('pointerup',()=>{folderPressed=false;});
     listen('pointercancel',()=>{folderPressed=false;});
+    let nativeTile=null;
     listen('dragstart',event=>{
+      nativeTile=null;
       const source=sourceFor(event), strip=activeStrip(), workspace=gZenWorkspaces.activeWorkspaceElement;
-      const essentialContainer=gZenWorkspaces.getCurrentEssentialsContainer?.();
-      if (!source || !strip || !(workspace.contains(source.item) || essentialContainer?.contains(source.item))) return;
-      // Own all supported sources, including labels and tabs inside folders.
-      // Cancel unsupported actions instead of falling back to a second engine.
+      const grid=gZenWorkspaces.getCurrentEssentialsContainer?.();
+      if (!source || !strip || !(workspace.contains(source.item) || grid?.contains(source.item))) return;
+      if (source.kind==='tab' && grid?.contains(source.item)) {
+        nativeTile={source,strip,grid,x:event.clientX,y:event.clientY};
+        return;
+      }
       event.stopImmediatePropagation();
       if (busy || finishing || event.composedPath().some(el=>el.matches?.('button,input,.tab-close-button')) || source.item.group?.hasAttribute('split-view-group')) {
         event.preventDefault(); return;
       }
+      startSidebarDrag(event,source,strip,grid);
+    });
+    function startSidebarDrag(event,source,strip,essentialContainer) {
       clear();
       const pins=gZenWorkspaces.pinnedTabsContainer;
       const rows=measure(source,strip,pins);
@@ -564,11 +571,11 @@
       const moving=new Set([mine]);
       const next=rows[rows.indexOf(mine)+1];
       const pitch=next && next.top>=mine.bottom && next.top-mine.bottom<20 ? next.top-mine.top : mine.height;
-      active={source,strip,pins,rows,moving,startY:event.clientY,y:event.clientY,origin:mine.top,height:mine.height,pitch};
+      active={source,strip,pins,rows,moving,startY:nativeTile?.y ?? event.clientY,y:event.clientY,origin:mine.top,height:mine.height,pitch};
       const rootBox=gBrowser.tabContainer.getBoundingClientRect();
       const pinBox=pins?.getBoundingClientRect(), normalBox=strip.getBoundingClientRect();
       const essentials=essentialContainer?.getBoundingClientRect();
-      active.x=active.startX=event.clientX;
+      active.x=event.clientX; active.startX=nativeTile?.x ?? event.clientX;
       active.tiles=Array.from(essentialContainer?.children || []).filter(isTab)
         .map(item=>({item,box:item.getBoundingClientRect()}));
       active.essentialContainer=essentialContainer;
@@ -600,6 +607,10 @@
       }
       sidebarDragging=true;
       document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
+      if (nativeTile) {
+        event.dataTransfer.updateDragImage?.(blank,0,0);
+        return;
+      }
       event.dataTransfer.effectAllowed='move';
       // Keep Gecko's drag source stable when a lazy tab loads and replaces its
       // label. This is transport data only; native movement handlers stay off.
@@ -609,12 +620,31 @@
       if (event.isTrusted) event.dataTransfer.addElement(source.item);
       event.dataTransfer.setDragImage(blank,0,0);
       draw();
-    });
+    }
     function inside(event) {
       const box=active.strip.getBoundingClientRect();
       return event.clientX>=box.left && event.clientX<=box.right;
     }
     async function handle(event) {
+      if (nativeTile) {
+        const {source,strip,grid}=nativeTile;
+        const box=grid.getBoundingClientRect(), sidebar=gBrowser.tabContainer.getBoundingClientRect();
+        const inList=event.clientY>=box.bottom && event.clientY<sidebar.bottom &&
+          event.clientX>=sidebar.left && event.clientX<=sidebar.right;
+        if (!inList) {
+          if (active) {
+            clear();
+            const image=gBrowser.tabContainer.tabDragAndDrop.originalDragImageArgs;
+            if (image?.length) event.dataTransfer.updateDragImage?.(...image);
+          }
+          return;
+        }
+        if (!active) {
+          gBrowser.tabContainer.tabDragAndDrop.clearDragOverVisuals?.();
+          gZenPinnedTabManager.removeTabContainersDragoverClass?.();
+          startSidebarDrag(event,source,strip,grid);
+        }
+      }
       if (!active) return;
       event.stopImmediatePropagation();
       event.preventDefault();
@@ -654,6 +684,11 @@
     });
     listen('dragleave',event=>{if(active)event.stopImmediatePropagation();});
     listen('dragend',event=>{
+      if (nativeTile) {
+        nativeTile=null;
+        if (active) clear();
+        return; // Zen started this drag and must release its native session.
+      }
       if (!active && !finishing && !event.dataTransfer?.types.includes('application/x-zen-tidy-sidebar')) return;
       event.stopImmediatePropagation();
       folderPressed=false;
