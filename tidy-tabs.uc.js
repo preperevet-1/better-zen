@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.28
+// @version        0.14.29
 // ==/UserScript==
 (() => {
   'use strict';
@@ -366,11 +366,11 @@
       const a=active, {strip,rows,y,source,pins}=a;
       if (source.kind==='tab' && a.essentials && y>=a.essentials.top && y<Math.max(a.essentials.bottom,a.essentialContainer.getBoundingClientRect().bottom) && (source.item.hasAttribute('zen-essential') || gZenPinnedTabManager.canEssentialBeAdded(source.item)))
       {
-        const tile=a.tiles.find(({box})=>y>=box.top && y<box.bottom && a.x>=box.left && a.x<box.right);
-        const after=tile && (source.item.hasAttribute('zen-essential')
-          ? Boolean(source.item.compareDocumentPosition(tile.item) & Node.DOCUMENT_POSITION_FOLLOWING)
-          : a.x>=tile.box.left+tile.box.width/2);
-        return {kind:'essential',container:a.essentialContainer,anchor:tile?.item,after};
+        // Measure before inserting the preview. That keeps a stationary pointer
+        // in the same insertion slot even when the extra tile wraps the grid.
+        const next=a.tiles.find(({box})=>y<box.top ||
+          (y<box.bottom && a.x<box.left+box.width/2));
+        return {kind:'essential',container:a.essentialContainer,anchor:next?.item,after:false};
       }
       const separator=getState(strip).separator;
       const boundary=a.boundary;
@@ -429,7 +429,9 @@
         if (!essentialSlot.isConnected) {
           const host=URL.parse(a.source.item.linkedBrowser?.currentURI?.spec || '')?.hostname.replace(/^www\./i,'');
           essentialSlot.textContent=Array.from(host || a.source.item.label || '•')[0].toLocaleUpperCase();
-          a.essentialContainer.append(essentialSlot);
+        }
+        if (essentialSlot.parentElement!==dest.container || essentialSlot.nextElementSibling!==(dest.anchor ?? null)) {
+          dest.container.insertBefore(essentialSlot,dest.anchor ?? null);
         }
       } else essentialSlot.remove();
       const dy=Math.max(a.top-a.origin,Math.min(a.bottom-a.origin-a.height,a.y-a.startY));
@@ -442,7 +444,7 @@
         ref=a.rows.find(r=>r.kind==='header'&&r.topic===ref.topic)||ref;
       }
       const gap=ref ? (dest.after?ref.bottom:ref.top) : (dest.kind==='normal'?a.strip.getBoundingClientRect().bottom:a.pins.getBoundingClientRect().bottom);
-      a.source.item.toggleAttribute('ztt-slot-preview',essentialSlot.isConnected);
+      a.source.item.toggleAttribute('ztt-slot-preview',essentialSlot.isConnected || Boolean(nativeTile));
       for (const r of a.rows) {
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
@@ -552,7 +554,8 @@
       const grid=gZenWorkspaces.getCurrentEssentialsContainer?.();
       if (!source || !strip || !(workspace.contains(source.item) || grid?.contains(source.item))) return;
       if (source.kind==='tab' && grid?.contains(source.item)) {
-        nativeTile={source,strip,grid,x:event.clientX,y:event.clientY};
+        nativeTile={source,strip,grid,x:event.clientX,y:event.clientY,
+          tiles:Array.from(grid.children).filter(isTab).map(item=>({item,box:item.getBoundingClientRect()}))};
         return;
       }
       event.stopImmediatePropagation();
@@ -608,7 +611,7 @@
       sidebarDragging=true;
       document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
       if (nativeTile) {
-        event.dataTransfer.updateDragImage?.(blank,0,0);
+        source.item.setAttribute('ztt-slot-preview','');
         return;
       }
       event.dataTransfer.effectAllowed='move';
@@ -636,6 +639,20 @@
             clear();
             const image=gBrowser.tabContainer.tabDragAndDrop.originalDragImageArgs;
             if (image?.length) event.dataTransfer.updateDragImage?.(...image);
+          }
+          if (event.type==='drop' && event.clientX>=box.left && event.clientX<=box.right &&
+              event.clientY>=box.top && event.clientY<box.bottom) {
+            const tile=nativeTile.tiles.find(({box:r})=>event.clientY>=r.top && event.clientY<r.bottom &&
+              event.clientX>=r.left && event.clientX<r.right);
+            if (tile && tile.item!==source.item) {
+              const after=event.clientX>=tile.box.left+tile.box.width/2;
+              // Keep native drag feedback and reconcile the slot after Zen handles the drop.
+              requestAnimationFrame(()=>{
+                if (source.item.parentElement===grid && tile.item.parentElement===grid &&
+                    (after ? tile.item.nextElementSibling : tile.item.previousElementSibling)!==source.item)
+                  place(source.item,{container:grid,anchor:tile.item,after});
+              });
+            }
           }
           return;
         }
