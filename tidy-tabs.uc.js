@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.29
+// @version        0.14.30
 // ==/UserScript==
 (() => {
   'use strict';
@@ -366,11 +366,23 @@
       const a=active, {strip,rows,y,source,pins}=a;
       if (source.kind==='tab' && a.essentials && y>=a.essentials.top && y<Math.max(a.essentials.bottom,a.essentialContainer.getBoundingClientRect().bottom) && (source.item.hasAttribute('zen-essential') || gZenPinnedTabManager.canEssentialBeAdded(source.item)))
       {
-        // Measure before inserting the preview. That keeps a stationary pointer
-        // in the same insertion slot even when the extra tile wraps the grid.
-        const next=a.tiles.find(({box})=>y<box.top ||
-          (y<box.bottom && a.x<box.left+box.width/2));
-        return {kind:'essential',container:a.essentialContainer,anchor:next?.item,after:false};
+        const grid=a.essentialContainer;
+        if (!essentialSlot.isConnected) {
+          const host=URL.parse(source.item.linkedBrowser?.currentURI?.spec || '')?.hostname.replace(/^www\./i,'');
+          essentialSlot.textContent=Array.from(host || source.item.label || '•')[0].toLocaleUpperCase();
+          grid.append(essentialSlot);
+        }
+        const cells=Array.from(grid.children).filter(el=>el===essentialSlot || isTab(el) && visible(el));
+        // The new tile can turn one row of three into two rows of two.
+        // Choose the nearest cell in the expanded grid, including its empty slot.
+        let index=0, distance=Infinity;
+        for (const [i,cell] of cells.entries()) {
+          const box=cell.getBoundingClientRect();
+          const d=Math.hypot(a.x-box.left-box.width/2,y-box.top-box.height/2);
+          if (d<distance) { index=i; distance=d; }
+        }
+        const anchor=cells.filter(el=>el!==essentialSlot)[index];
+        return {kind:'essential',container:grid,anchor,after:false};
       }
       const separator=getState(strip).separator;
       const boundary=a.boundary;
@@ -426,10 +438,6 @@
       if (!active) return;
       const a=active, dest=target();
       if (dest.kind==='essential' && !a.source.item.hasAttribute('zen-essential')) {
-        if (!essentialSlot.isConnected) {
-          const host=URL.parse(a.source.item.linkedBrowser?.currentURI?.spec || '')?.hostname.replace(/^www\./i,'');
-          essentialSlot.textContent=Array.from(host || a.source.item.label || '•')[0].toLocaleUpperCase();
-        }
         if (essentialSlot.parentElement!==dest.container || essentialSlot.nextElementSibling!==(dest.anchor ?? null)) {
           dest.container.insertBefore(essentialSlot,dest.anchor ?? null);
         }
@@ -456,7 +464,7 @@
           continue;
         }
         const below=r.top>a.origin;
-        const shift=dest.kind==='essential' ? false : below ? r.top<gap : r.bottom>gap;
+        const shift=dest.kind==='essential' || nativeTile ? false : below ? r.top<gap : r.bottom>gap;
         for (const el of r.nodes) {
           el.style.setProperty('--ztt-drag-y',(shift?(below?-a.pitch:a.pitch):0)+'px');
           el.setAttribute('ztt-slide','');
@@ -1006,6 +1014,13 @@
       color:color-mix(in srgb,currentColor 76%,var(--zen-primary-color,AccentColor)); border-inline-start-color:transparent; border-radius:50%; opacity:1; pointer-events:none;
       animation:ztt-tab-spin 1.65s linear infinite; will-change:transform;
     }
+    #tabbrowser-tabs .tabbrowser-tab[zen-essential][busy]::after {
+      content:""; position:absolute; inset:0; margin:auto; width:14px; height:14px;
+      box-sizing:border-box; padding:0; pointer-events:none; border-radius:50%;
+      color:color-mix(in srgb,CanvasText 76%,var(--zen-primary-color,AccentColor));
+      border:2px solid currentColor; border-inline-start-color:transparent;
+      animation:ztt-tab-spin 1.65s linear infinite;
+    }
     #tabContextMenu > [ztt-omit] { display:none!important; }
     #tabbrowser-tabs[expanded] .tabbrowser-tab[busy]:not([zen-essential]) :is(.tab-reset-button,.tab-reset-pin-button,.tab-close-button) { display:none!important; }
     .ztt-action-tip:popover-open { display:flex; align-items:center; gap:3px; position:fixed; inset:auto; margin:0; pointer-events:none;
@@ -1018,6 +1033,7 @@
       border-bottom-width:2px; background:color-mix(in srgb,currentColor 13%,transparent); }
     @keyframes ztt-tab-spin { to { transform:rotate(1turn); } }
     @media(prefers-reduced-motion:reduce) {
+      #tabbrowser-tabs .tabbrowser-tab[zen-essential][busy]::after,
       #tabbrowser-tabs[expanded] .tabbrowser-tab[busy] .tab-content::after { animation:none; }
     }
     #tabbrowser-tabs .tabbrowser-tab[zen-essential]:is([selected],[visuallyselected]) .tab-background {
@@ -1754,7 +1770,9 @@
       tip.replaceChildren(node('span','',match ? match[1]+match[4] : caption));
       if(match) for(const key of [...match[2],match[3]].filter(Boolean)) tip.append(node('kbd','',key));
     }
+    let dragging=false;
     function hover(e) {
+      if (dragging) return;
       const path=e.composedPath();
       for (const [selector,label,keyId] of rules) {
         const el=path.find(n=>n.matches?.(selector));
@@ -1772,6 +1790,7 @@
         }
         previousTooltip=el.getAttribute('tooltip');
         el.setAttribute('tooltip',silent.id);
+        if(el.matches('.tabbrowser-tab:not([zen-essential])')) return;
         timer=setTimeout(async ()=>{
           if (!el.isConnected) return hide();
           const workspace=el.closest('#zen-workspaces-button') && el.getAttribute('zen-workspace-id');
@@ -1803,14 +1822,17 @@
       hide();
     }
     const opts={capture:true,signal:abort.signal};
+    window.addEventListener('dragstart',()=>{ dragging=true; hide(); },opts);
+    for(const event of ['drop','dragend','pointerdown','pointerup'])
+      window.addEventListener(event,()=>{dragging=false;},opts);
     window.addEventListener('pointerover',hover,opts);
     window.addEventListener('pointerout',e=>{if(anchor && !anchor.contains(e.relatedTarget)) hide();},opts);
     for(const event of ['pointerdown','keydown','dragstart','blur']) window.addEventListener(event,hide,opts);
-    window.addEventListener('popupshowing',e=>{if(anchor && e.target.localName==='tooltip') e.preventDefault();},opts);
+    window.addEventListener('popupshowing',e=>{if((anchor || dragging) && e.target.localName==='tooltip') e.preventDefault();},opts);
     // Some chrome controls populate an anonymous tooltip only as it opens.
     window.addEventListener('popupshowing',event=>{
       const popup=event.target;
-      if(anchor || popup.localName!=='tooltip' || popup===silent) return;
+      if(dragging || anchor || popup.localName!=='tooltip' || popup===silent) return;
       const target=popup.triggerNode || document.tooltipNode;
       if(!target?.closest?.('#navigator-toolbox,#browser') || target.localName==='browser') return;
       const caption=popup.getAttribute('label') || target.getAttribute('tooltiptext') ||
@@ -1906,10 +1928,10 @@
     installPinnedBehavior();
     installCreateMenu();
     installInsertionHook();
+    installActionTips();
     installSidebarMotion();
     installSelectionMenu();
     installTabActions();
-    installActionTips();
     for (const event of ['SSTabRestored','SSTabRestoring','TabOpen','TabClose','TabMove','TabPinned','TabUnpinned','TabAttrModified','TabSelect','TabGroupCreate','TabGroupRemoved']) {
       gBrowser.tabContainer.addEventListener(event, schedule, { signal:abort.signal });
     }
