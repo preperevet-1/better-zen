@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.31
+// @version        0.14.32
 // ==/UserScript==
 (() => {
   'use strict';
@@ -321,6 +321,7 @@
       return rows;
     }
     function removeTransforms(session) {
+      session.preview?.remove();
       session.source.item.removeAttribute('ztt-slot-preview');
       for (const r of session.rows) for (const el of r.nodes) {
         el.removeAttribute('ztt-lift'); el.removeAttribute('ztt-slide');
@@ -367,7 +368,7 @@
       const pinnedRows=rows.filter(row=>row.container===pins && row.kind!=='separator');
       const emptyPinZone=source.kind==='group' && !pinnedRows.length;
       const split=emptyPinZone ? Math.max(boundary+(divider?.height||0),a.top+18) : boundary;
-      const inPins=pins && y<split;
+      const inPins=pins && (a.preview || y<split);
       if (inPins && source.kind==='tab') {
         const last=pinnedRows.at(-1);
         if (last?.kind==='folder') {
@@ -424,6 +425,14 @@
         ref=a.rows.find(r=>r.kind==='header'&&r.topic===ref.topic)||ref;
       }
       const gap=ref ? (dest.after?ref.bottom:ref.top) : (dest.kind==='normal'?a.strip.getBoundingClientRect().bottom:a.pins.getBoundingClientRect().bottom);
+      if (a.preview) {
+        a.preview.style.top=(a.y-a.height/2)+'px';
+        for (const r of a.rows) for (const el of r.nodes) {
+          el.style.setProperty('--ztt-drag-y',(r.top>=gap ? a.pitch : 0)+'px');
+          el.setAttribute('ztt-slide','');
+        }
+        return;
+      }
       for (const r of a.rows) {
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
@@ -467,6 +476,7 @@
     async function commit(a,dest) {
       const {source,strip}=a, item=source.item;
       if (source.kind==='tab') {
+        if (a.preview) gZenPinnedTabManager.removeEssentials(item,false);
         const oldFolder=item.group;
         if (oldFolder && oldFolder!==dest.folder) gBrowser.ungroupTab(item);
         if (dest.kind==='normal') {
@@ -524,10 +534,9 @@
       if (!source || !strip || !(workspace.contains(source.item) || grid?.contains(source.item))) return;
       if (source.kind==='tab') {
         // Zen needs its original dragstart data and drag image to accept a tab
-        // in Essentials. A gesture originating in the grid stays native throughout.
-        if (!grid?.contains(source.item) && !source.item.hasAttribute('zen-essential') &&
-            !source.item.group?.hasAttribute('split-view-group'))
-          nativeTab={source,strip,grid,startY:event.clientY};
+        // in Essentials, including when the pointer re-enters the grid.
+        if (!source.item.group?.hasAttribute('split-view-group'))
+          nativeTab={source,strip,grid,startY:event.clientY,fromGrid:grid?.contains(source.item)};
         return;
       }
       event.stopImmediatePropagation();
@@ -540,6 +549,21 @@
       clear();
       const pins=gZenWorkspaces.pinnedTabsContainer;
       const rows=measure(source,strip,pins);
+      if (nativeTab?.fromGrid) {
+        const bounds=strip.getBoundingClientRect();
+        const height=rows.find(r=>r.kind==='tab')?.height || 36;
+        const preview=node('div','ztt-pin-drag-preview',source.item.label);
+        Object.assign(preview.style,{left:(bounds.left+4)+'px',width:(bounds.width-8)+'px',height:height+'px'});
+        document.documentElement.append(preview);
+        source.item.setAttribute('ztt-slot-preview','');
+        active={source,strip,pins,rows,preview,moving:new Set(),height,pitch:height,
+          boundary:getState(strip).separator?.getBoundingClientRect().top ?? bounds.top};
+        sidebarDragging=true;
+        gBrowser.tabContainer.tabDragAndDrop.clearDragOverVisuals?.();
+        gZenPinnedTabManager.removeTabContainersDragoverClass?.();
+        event.dataTransfer.updateDragImage?.(blank,0,0);
+        return;
+      }
       const mine=rows.find(r=>r.item===source.item);
       if (!mine) { event.preventDefault(); return; }
       const moving=new Set([mine]);
@@ -602,7 +626,9 @@
           event.clientY>=Math.max(sidebar.top,gridBox?.bottom ?? 0,
             Math.min(strip.getBoundingClientRect().top,gZenWorkspaces.pinnedTabsContainer?.getBoundingClientRect().top ?? Infinity)) &&
           event.clientY<sidebar.bottom && !event.composedPath().includes(grid);
-        if (!inList) {
+        const separator=getState(strip).separator?.getBoundingClientRect();
+        const pinEnd=separator?.bottom ?? strip.getBoundingClientRect().top;
+        if (!inList || (nativeTab.fromGrid && event.clientY>=pinEnd)) {
           if (active) {
             clear();
             const image=gBrowser.tabContainer.tabDragAndDrop.originalDragImageArgs;
@@ -664,6 +690,14 @@
     listen('scroll',()=>{
       if (!active) return;
       // Scroll moves the coordinate system, not the cursor or the target order.
+      if (active.preview) {
+        active.rows=measure(active.source,active.strip,active.pins).map(r=>{
+          const shift=parseFloat(r.nodes[0].style.getPropertyValue('--ztt-drag-y')) || 0;
+          return {...r,top:r.top-shift,bottom:r.bottom-shift};
+        });
+        if (!frame) frame=requestAnimationFrame(draw);
+        return;
+      }
       const a=active, r=[...a.moving][0], el=r.nodes[0];
       const shift=Number.parseFloat(el.style.getPropertyValue('--ztt-drag-y'))||0;
       const delta=el.getBoundingClientRect().top-shift-r.top;
@@ -1137,6 +1171,11 @@
     }
     :root[ztt-hide-player] #zen-media-controls-toolbar { display:none!important; }
     :root:has(#ztt-create-panel:popover-open) #zen-media-controls-toolbar { visibility:hidden!important; pointer-events:none!important; }
+    .ztt-pin-drag-preview { position:fixed; z-index:2147483647; pointer-events:none;
+      box-sizing:border-box; padding-inline:12px; display:block; align-content:center;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:10px;
+      background:var(--toolbar-bgcolor,Canvas); color:var(--toolbar-color,CanvasText);
+      font:menu; box-shadow:0 2px 8px #0003; }
     .ztt-drag-blank { position:fixed; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
     #tabbrowser-tabs :is([ztt-lift],[ztt-slide]) {
       transform:translate(var(--ztt-drag-x,0px),var(--ztt-drag-y,0px))!important; transform-origin:center!important; position:relative!important; }
