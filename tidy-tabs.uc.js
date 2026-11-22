@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.34
+// @version        0.14.35
 // ==/UserScript==
 (() => {
   'use strict';
@@ -1928,6 +1928,11 @@
         return { top: box.top, height: box.height };
       };
 
+      const measureHeadings = () => (states.get(activeStrip())?.headers || []).map(node => {
+        const box = node.getBoundingClientRect();
+        return {node, mid:box.top + box.height / 2};
+      });
+
       const measureRows = (keepOpen = null) => {
         const rows = [];
         const seen = new Set();
@@ -2603,6 +2608,77 @@
         }
       };
 
+      // A Tidy topic occupies consecutive native rows. Use the same row transforms
+      // for its heading, its tabs, and the neighboring blocks that make room.
+      let topicDrag = null;
+      const endTopic = commit => {
+        const state = topicDrag;
+        if (!state) return;
+        topicDrag = null;
+        if (state.header.hasPointerCapture(state.pointer)) state.header.releasePointerCapture(state.pointer);
+        if (!state.started) return;
+        root.removeAttribute('ztt-moving-topic');
+        clearMoved();
+        if (commit && state.strip === activeStrip() && state.from !== state.to) {
+          const blocks = state.blocks.slice();
+          blocks.splice(state.to, 0, blocks.splice(state.from, 1)[0]);
+          const loose = tabsIn(state.strip).filter(tab => !getState(state.strip).assignments.has(tab));
+          moveInOrder(state.strip, loose.concat(blocks.flatMap(block => block.tabs)));
+          render(state.strip);
+        }
+        schedule();
+      };
+      listen(window, 'pointerdown', event => {
+        const header = event.target.closest?.('.ztt-header');
+        const strip = activeStrip();
+        if (!header || header.parentElement !== strip || event.button || !event.isPrimary ||
+            event.target.closest('button,input') || header.querySelector('input')) return;
+        const blocks = getState(strip).headers.map(node => {
+          const tabs = members(strip, node.dataset.zttGroup);
+          const top = node.getBoundingClientRect().top - parseFloat(getComputedStyle(node).marginTop);
+          const bottom = (tabs.at(-1) || node).getBoundingClientRect().bottom;
+          return {node, tabs, top, bottom};
+        });
+        const from = blocks.findIndex(block => block.node === header);
+        if (from < 0 || blocks.length < 2) return;
+        topicDrag = {header, strip, blocks, from, to:from, y:event.clientY, pointer:event.pointerId};
+      }, true);
+      listen(window, 'pointermove', event => {
+        const state = topicDrag;
+        if (!state || event.pointerId !== state.pointer) return;
+        if (!event.buttons) { endTopic(false); return; }
+        const {blocks, from} = state;
+        const own = blocks[from];
+        const dy = Math.max(blocks[0].top - own.top, Math.min(blocks.at(-1).bottom - own.bottom, event.clientY - state.y));
+        if (!state.started) {
+          if (Math.abs(dy) < 4) return;
+          state.started = true;
+          state.header.setPointerCapture(event.pointerId);
+          root.setAttribute('ztt-moving-topic', '');
+        }
+        event.preventDefault();
+        let to = from;
+        for (const [index, block] of blocks.entries()) {
+          const mid = (block.top + block.bottom) / 2;
+          if (index < from && own.top + dy < mid) to = Math.min(to,index);
+          if (index > from && own.bottom + dy > mid) to = Math.max(to,index);
+        }
+        state.to = to;
+        const height = blocks[from + 1] ? blocks[from + 1].top - own.top : own.bottom - own.top;
+        for (const [index, block] of blocks.entries()) {
+          const shift = index === from ? dy : index >= to && index < from ? height :
+            index <= to && index > from ? -height : 0;
+          for (const row of [block.node, ...block.tabs]) place(row, shift, index === from);
+        }
+      }, true);
+      listen(window, 'pointerup', event => {
+        if (topicDrag?.pointer === event.pointerId) endTopic(true);
+      }, true);
+      for (const type of ['pointercancel', 'blur', 'ZenWorkspacesUIUpdate'])
+        listen(window, type, () => endTopic(false));
+      listen(window, 'keydown', event => { if (event.key === 'Escape') endTopic(false); }, true);
+      onStop(() => endTopic(false));
+
       const placeSep = (sepDelta) => {
         const sep = currentSeparator();
         if (sep && drag.sepDelta !== sepDelta) {
@@ -2664,6 +2740,13 @@
           dy = drag.origin > drag.sepTop ? Math.max(dy, drag.sepTop + 1 - drag.origin) : Math.min(dy, drag.sepTop - 1 - drag.height - drag.origin);
         }
         const visualMid = drag.origin + dy + drag.height / 2;
+        const originMid = drag.origin + drag.height / 2;
+        for (const {node, mid} of drag.headings) {
+          const below = mid > originMid;
+          const crossed = drag.essentials || drag.splitEssential ? below :
+            below ? visualMid > mid : visualMid < mid;
+          place(node, crossed ? (below ? -drag.pitch : drag.pitch) : 0, false);
+        }
         place(moving, dy, true);
 
         // New Tab at the foot of the list, when the list closes up (only if the
@@ -3233,6 +3316,7 @@
       const cloneCopy = (tab) => {
         const copy = trackCopy(tab.cloneNode(true));
         copy.removeAttribute("id");
+        copy.setAttribute("ztt-initial", tab.hasAttribute("zen-essential") && tab.getAttribute("ztt-initial") || essentialInitial(tab));
         for (const name of [
           "dragtarget", "pending-drag", "multiselected", "zen-pinned-changed", "folder-active", "zen-folder-active",
           "zia-drop-lock", "zia-landing", "zia-hover-held", "zia-held-pinned", "zia-shift", "zia-dragging", "zia-to-essential",
@@ -3839,6 +3923,7 @@
         if (!target || target.hasAttribute?.("zen-essential")) {
           return;
         }
+        holdSidebarWidth();
         const folder = isFolderEl(target) ? target : null;
 
         // an open folder that the drag caught before it shut: shut now
@@ -3966,6 +4051,7 @@
           clientY: event.clientY || pending?.clientY || 0,
           screenY: event.screenY || pending?.screenY || 0,
           companions,
+          headings:measureHeadings(),
           foldedFrom,
           space: window.gZenWorkspaces?.activeWorkspace,
         };
@@ -4465,11 +4551,13 @@
         if (essentialDrag) {
           essentialDrag.copy?.remove();
           essentialDrag.tab?.removeAttribute("zia-essential-dragged");
+          releaseSidebarWidth();
           essentialDrag = null;
         }
         sweepLeftovers();
         const tile = tab.getBoundingClientRect();
         const drawn = tab.querySelector(".tab-background")?.getBoundingClientRect() || tile;
+        holdSidebarWidth();
         const copy = cloneCopy(tab);
         sizeCopy(copy, tile.width, drawn.height);
         fitSplitHalves(copy, 0, tab.querySelector(".zia-split-half")?.getBoundingClientRect() || null);
@@ -4601,6 +4689,7 @@
         folder?.setAttribute("zia-drop-slot", "true");
       };
       const openListRoom = () => {
+        listRoom.headings = measureHeadings();
         listRoom.rows = measureRows(null);
         listRoom.sep = currentSeparator();
         listRoom.sepTop = listRoom.sep ? listRoom.sep.getBoundingClientRect().top : null;
@@ -4641,6 +4730,7 @@
           openListRoom();
         }
         const y = listAt(pointerY);
+        for (const {node, mid} of listRoom.headings) place(node, mid > y ? listRoom.pitch : 0, false);
         let first = null;
         let prev = null;
         for (const row of listRoom.rows) {
@@ -4700,6 +4790,7 @@
             place(row.node, 0, false);
           }
         }
+        for (const {node} of listRoom.headings) clearNode(node);
         if (listRoom.sep && listRoom.sepDelta) {
           listRoom.sepDelta = 0;
           place(listRoom.sep, 0, false);
@@ -4974,6 +5065,7 @@
 
       const endEssentialDrag = (event) => {
         const state = essentialDrag;
+        releaseSidebarWidth();
         essentialDrag = null;
         essentialDragging = false;
         if (!state) {
@@ -5239,6 +5331,27 @@
         }
       };
 
+      const heldWidths = new Set();
+      function holdSidebarWidth() {
+        const space = gZenWorkspaces.activeWorkspaceElement;
+        if (!space || heldWidths.size) return;
+        const sections = [space, ...space.querySelectorAll('.zen-workspace-pinned-tabs-section, .zen-workspace-normal-tabs-section')];
+        const widths = sections.map(section => section.getBoundingClientRect().width);
+        sections.forEach((section, i) => {
+          if (!widths[i]) return;
+          section.style.setProperty('--ztt-drag-width', widths[i] + 'px');
+          section.setAttribute('ztt-drag-width', '');
+          heldWidths.add(section);
+        });
+      }
+      function releaseSidebarWidth() {
+        for (const section of heldWidths) {
+          section.removeAttribute('ztt-drag-width');
+          section.style.removeProperty('--ztt-drag-width');
+        }
+        heldWidths.clear();
+      }
+      onStop(releaseSidebarWidth);
       const unclipped = [];
       const unclipAround = (node) => {
         const stop = document.getElementById("navigator-toolbox");
@@ -5464,6 +5577,7 @@
         easeOutWidth(tab);
         makeRoom(null);
         dropProxy();
+        releaseSidebarWidth();
         drag = null;
         pending = null;
         document.documentElement.removeAttribute("zia-dragging-tab");
@@ -5485,6 +5599,7 @@
         easeOutWidth(drag.split || tab);
         makeRoom(null);
         dropProxy();
+        releaseSidebarWidth();
         drag = null;
         pending = null;
         try {
@@ -5537,6 +5652,7 @@
         if (drag?.bg) {
           setTimeout(() => requestAnimationFrame(() => easeOutWidth(droppedTab)), 0);
         }
+        releaseSidebarWidth();
         drag = null;
         pending = null;
         document.documentElement.removeAttribute("zia-dragging-tab");
@@ -5984,16 +6100,18 @@
     s.headers = kept;
   }
 
+  function essentialInitial(tab) {
+    const host = URL.parse(tab.linkedBrowser?.currentURI?.spec || '')?.hostname.replace(/^www\./i, '');
+    return Array.from(host || tab.label?.trim() || '•')[0].toLocaleUpperCase();
+  }
   function schedule() {
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (destroyed || busy) return;
-      if (document.documentElement.hasAttribute("zia-dragging-tab") || gBrowser.tabContainer.hasAttribute("zia-settling") || gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
+      if (document.documentElement.hasAttribute("ztt-moving-topic") || document.documentElement.hasAttribute("zia-dragging-tab") || gBrowser.tabContainer.hasAttribute("zia-settling") || gBrowser.tabContainer.hasAttribute('movingtab')) { schedule(); return; }
       for (const [strip, s] of states) if (!strip.isConnected) { removeHeaders(s); unmountControl(s); states.delete(strip); }
-      for (const tab of document.querySelectorAll('.tabbrowser-tab[zen-essential]')) {
-        const url = URL.parse(tab.linkedBrowser?.currentURI?.spec || '');
-        const host = url?.hostname.replace(/^www\./i, '');
-        const initial = Array.from(host || tab.label?.trim() || '•')[0].toLocaleUpperCase();
+      for (const tab of document.querySelectorAll('.tabbrowser-tab[zen-essential]:not([zia-essential-proxy])')) {
+        const initial = essentialInitial(tab);
         if (tab.getAttribute('ztt-initial') !== initial) tab.setAttribute('ztt-initial', initial);
       }
       const strip = activeStrip();
@@ -7262,6 +7380,19 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
   }
 }
 
+    .ztt-header { user-select:none; touch-action:none; }
+    #tabbrowser-tabs .ztt-header[zia-shift] { transition:transform 100ms ease-out!important; }
+    #tabbrowser-tabs .ztt-header[zia-dragging] { transition:none!important; }
+    .tabbrowser-tab[zia-essential-proxy][zen-essential]:not([zia-split-tile]) {
+      border:0!important; outline:0!important; box-shadow:none!important;
+      background:light-dark(#e0e0e0,#333)!important; border-radius:var(--border-radius-medium)!important;
+      & > .tab-stack { visibility:hidden!important; }
+      &::after { color:light-dark(#929292,#aaa); }
+    }
+    [ztt-drag-width] {
+      box-sizing:border-box!important; inline-size:var(--ztt-drag-width)!important;
+      min-inline-size:var(--ztt-drag-width)!important; max-inline-size:var(--ztt-drag-width)!important;
+    }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
       border-radius:22px; corner-shape:squircle; background:light-dark(#fffefe,#2c2b30); color:light-dark(#171619,#f5f3f7);
