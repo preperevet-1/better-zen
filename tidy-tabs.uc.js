@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.30
+// @version        0.14.31
 // ==/UserScript==
 (() => {
   'use strict';
@@ -276,8 +276,6 @@
       return originalFolderPopup.apply(this,args);
     };
     gZenFolders.openTabsPopup = guardedFolderPopup;
-    const essentialSlot=document.createXULElement('vbox');
-    essentialSlot.className='ztt-essential-slot';
     const blank = node('div','ztt-drag-blank');
     document.documentElement.append(blank);
     const listen = (type,fn) => window.addEventListener(type,fn,{capture:true,signal:abort.signal});
@@ -346,7 +344,6 @@
     }
     function clear() {
       cancelAnimationFrame(frame); frame=0;
-      essentialSlot.remove();
       if (active) removeTransforms(active);
       previewFolder(null);
       active=null; sidebarDragging=false;
@@ -364,26 +361,6 @@
     }
     function target() {
       const a=active, {strip,rows,y,source,pins}=a;
-      if (source.kind==='tab' && a.essentials && y>=a.essentials.top && y<Math.max(a.essentials.bottom,a.essentialContainer.getBoundingClientRect().bottom) && (source.item.hasAttribute('zen-essential') || gZenPinnedTabManager.canEssentialBeAdded(source.item)))
-      {
-        const grid=a.essentialContainer;
-        if (!essentialSlot.isConnected) {
-          const host=URL.parse(source.item.linkedBrowser?.currentURI?.spec || '')?.hostname.replace(/^www\./i,'');
-          essentialSlot.textContent=Array.from(host || source.item.label || '•')[0].toLocaleUpperCase();
-          grid.append(essentialSlot);
-        }
-        const cells=Array.from(grid.children).filter(el=>el===essentialSlot || isTab(el) && visible(el));
-        // The new tile can turn one row of three into two rows of two.
-        // Choose the nearest cell in the expanded grid, including its empty slot.
-        let index=0, distance=Infinity;
-        for (const [i,cell] of cells.entries()) {
-          const box=cell.getBoundingClientRect();
-          const d=Math.hypot(a.x-box.left-box.width/2,y-box.top-box.height/2);
-          if (d<distance) { index=i; distance=d; }
-        }
-        const anchor=cells.filter(el=>el!==essentialSlot)[index];
-        return {kind:'essential',container:grid,anchor,after:false};
-      }
       const separator=getState(strip).separator;
       const boundary=a.boundary;
       const divider=rows.find(row=>row.kind==='separator');
@@ -437,11 +414,6 @@
       frame=0;
       if (!active) return;
       const a=active, dest=target();
-      if (dest.kind==='essential' && !a.source.item.hasAttribute('zen-essential')) {
-        if (essentialSlot.parentElement!==dest.container || essentialSlot.nextElementSibling!==(dest.anchor ?? null)) {
-          dest.container.insertBefore(essentialSlot,dest.anchor ?? null);
-        }
-      } else essentialSlot.remove();
       const dy=Math.max(a.top-a.origin,Math.min(a.bottom-a.origin-a.height,a.y-a.startY));
       const intoFolder=a.source.kind==='tab' && Boolean(dest.folder || dest.topic);
       // Preview and commit use the same slot. A separate threshold for the
@@ -452,11 +424,9 @@
         ref=a.rows.find(r=>r.kind==='header'&&r.topic===ref.topic)||ref;
       }
       const gap=ref ? (dest.after?ref.bottom:ref.top) : (dest.kind==='normal'?a.strip.getBoundingClientRect().bottom:a.pins.getBoundingClientRect().bottom);
-      a.source.item.toggleAttribute('ztt-slot-preview',essentialSlot.isConnected || Boolean(nativeTile));
       for (const r of a.rows) {
         if (a.moving.has(r)) {
           for (const el of r.nodes) {
-            el.style.setProperty('--ztt-drag-x',dest.kind==='essential' && el.hasAttribute('zen-essential') ? (a.x-a.startX)+'px' : '0px');
             el.style.setProperty('--ztt-drag-y',Math.round(dy)+'px');
             el.style.setProperty('--ztt-drag-inset',intoFolder?'5%':'0px');
             el.setAttribute('ztt-lift','');
@@ -464,7 +434,7 @@
           continue;
         }
         const below=r.top>a.origin;
-        const shift=dest.kind==='essential' || nativeTile ? false : below ? r.top<gap : r.bottom>gap;
+        const shift=below ? r.top<gap : r.bottom>gap;
         for (const el of r.nodes) {
           el.style.setProperty('--ztt-drag-y',(shift?(below?-a.pitch:a.pitch):0)+'px');
           el.setAttribute('ztt-slide','');
@@ -497,15 +467,6 @@
     async function commit(a,dest) {
       const {source,strip}=a, item=source.item;
       if (source.kind==='tab') {
-        if (dest.kind==='essential') {
-          if (!item.hasAttribute('zen-essential')) {
-            if (!gZenPinnedTabManager.addToEssentials(item)) return;
-            membership(item,null,strip);
-          }
-          place(item,dest);
-          return;
-        }
-        if (item.hasAttribute('zen-essential')) gZenPinnedTabManager.removeEssentials(item,dest.kind==='normal');
         const oldFolder=item.group;
         if (oldFolder && oldFolder!==dest.folder) gBrowser.ungroupTab(item);
         if (dest.kind==='normal') {
@@ -555,15 +516,18 @@
     });
     listen('pointerup',()=>{folderPressed=false;});
     listen('pointercancel',()=>{folderPressed=false;});
-    let nativeTile=null;
+    let nativeTab=null;
     listen('dragstart',event=>{
-      nativeTile=null;
+      nativeTab=null;
       const source=sourceFor(event), strip=activeStrip(), workspace=gZenWorkspaces.activeWorkspaceElement;
       const grid=gZenWorkspaces.getCurrentEssentialsContainer?.();
       if (!source || !strip || !(workspace.contains(source.item) || grid?.contains(source.item))) return;
-      if (source.kind==='tab' && grid?.contains(source.item)) {
-        nativeTile={source,strip,grid,x:event.clientX,y:event.clientY,
-          tiles:Array.from(grid.children).filter(isTab).map(item=>({item,box:item.getBoundingClientRect()}))};
+      if (source.kind==='tab') {
+        // Zen needs its original dragstart data and drag image to accept a tab
+        // in Essentials. A gesture originating in the grid stays native throughout.
+        if (!grid?.contains(source.item) && !source.item.hasAttribute('zen-essential') &&
+            !source.item.group?.hasAttribute('split-view-group'))
+          nativeTab={source,strip,grid,startY:event.clientY};
         return;
       }
       event.stopImmediatePropagation();
@@ -576,23 +540,16 @@
       clear();
       const pins=gZenWorkspaces.pinnedTabsContainer;
       const rows=measure(source,strip,pins);
-      if (essentialContainer?.contains(source.item)) rows.unshift(row([source.item],{kind:'tab',item:source.item,container:essentialContainer}));
       const mine=rows.find(r=>r.item===source.item);
       if (!mine) { event.preventDefault(); return; }
       const moving=new Set([mine]);
       const next=rows[rows.indexOf(mine)+1];
       const pitch=next && next.top>=mine.bottom && next.top-mine.bottom<20 ? next.top-mine.top : mine.height;
-      active={source,strip,pins,rows,moving,startY:nativeTile?.y ?? event.clientY,y:event.clientY,origin:mine.top,height:mine.height,pitch};
+      active={source,strip,pins,rows,moving,startY:nativeTab?.startY ?? event.clientY,y:event.clientY,origin:mine.top,height:mine.height,pitch};
       const rootBox=gBrowser.tabContainer.getBoundingClientRect();
       const pinBox=pins?.getBoundingClientRect(), normalBox=strip.getBoundingClientRect();
       const essentials=essentialContainer?.getBoundingClientRect();
-      active.x=event.clientX; active.startX=nativeTile?.x ?? event.clientX;
-      active.tiles=Array.from(essentialContainer?.children || []).filter(isTab)
-        .map(item=>({item,box:item.getBoundingClientRect()}));
-      active.essentialContainer=essentialContainer;
-      if (essentials) active.essentials={top:essentials.top-2,bottom:essentials.top+Math.max(essentials.height,10)};
       active.top=Math.max(Math.min(pinBox?.top??normalBox.top,normalBox.top),essentials?.height?essentials.bottom:0,rootBox.top);
-      if (source.kind==='tab' && essentials) active.top=essentials.top;
       active.bottom=Math.min(rootBox.bottom,window.innerHeight);
       active.bottom=Math.max(active.bottom,active.top+Math.min(mine.height,rootBox.height));
       active.boundary=getState(strip).separator?.getBoundingClientRect().top??normalBox.top;
@@ -618,8 +575,8 @@
       }
       sidebarDragging=true;
       document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
-      if (nativeTile) {
-        source.item.setAttribute('ztt-slot-preview','');
+      if (nativeTab) {
+        event.dataTransfer.updateDragImage?.(blank,0,0);
         return;
       }
       event.dataTransfer.effectAllowed='move';
@@ -637,38 +594,23 @@
       return event.clientX>=box.left && event.clientX<=box.right;
     }
     async function handle(event) {
-      if (nativeTile) {
-        const {source,strip,grid}=nativeTile;
-        const box=grid.getBoundingClientRect(), sidebar=gBrowser.tabContainer.getBoundingClientRect();
-        const inList=event.clientY>=box.bottom && event.clientY<sidebar.bottom &&
-          event.clientX>=sidebar.left && event.clientX<=sidebar.right;
+      if (nativeTab) {
+        const {source,strip,grid}=nativeTab;
+        const sidebar=gBrowser.tabContainer.getBoundingClientRect();
+        const gridBox=grid?.getBoundingClientRect();
+        const inList=event.clientX>=sidebar.left && event.clientX<sidebar.right &&
+          event.clientY>=Math.max(sidebar.top,gridBox?.bottom ?? 0,
+            Math.min(strip.getBoundingClientRect().top,gZenWorkspaces.pinnedTabsContainer?.getBoundingClientRect().top ?? Infinity)) &&
+          event.clientY<sidebar.bottom && !event.composedPath().includes(grid);
         if (!inList) {
           if (active) {
             clear();
             const image=gBrowser.tabContainer.tabDragAndDrop.originalDragImageArgs;
             if (image?.length) event.dataTransfer.updateDragImage?.(...image);
           }
-          if (event.type==='drop' && event.clientX>=box.left && event.clientX<=box.right &&
-              event.clientY>=box.top && event.clientY<box.bottom) {
-            const tile=nativeTile.tiles.find(({box:r})=>event.clientY>=r.top && event.clientY<r.bottom &&
-              event.clientX>=r.left && event.clientX<r.right);
-            if (tile && tile.item!==source.item) {
-              const after=event.clientX>=tile.box.left+tile.box.width/2;
-              // Keep native drag feedback and reconcile the slot after Zen handles the drop.
-              requestAnimationFrame(()=>{
-                if (source.item.parentElement===grid && tile.item.parentElement===grid &&
-                    (after ? tile.item.nextElementSibling : tile.item.previousElementSibling)!==source.item)
-                  place(source.item,{container:grid,anchor:tile.item,after});
-              });
-            }
-          }
           return;
         }
-        if (!active) {
-          gBrowser.tabContainer.tabDragAndDrop.clearDragOverVisuals?.();
-          gZenPinnedTabManager.removeTabContainersDragoverClass?.();
-          startSidebarDrag(event,source,strip,grid);
-        }
+        if (!active) startSidebarDrag(event,source,strip,grid);
       }
       if (!active) return;
       event.stopImmediatePropagation();
@@ -683,7 +625,7 @@
       const a=active, dest=valid?target():null;
       previewFolder(null);
       const before=new Map(a.rows.flatMap(r=>r.nodes.map(el=>[el,el.getBoundingClientRect().top])));
-      cancelAnimationFrame(frame); frame=0; removeTransforms(a); essentialSlot.remove(); active=null;
+      cancelAnimationFrame(frame); frame=0; removeTransforms(a); active=null;
       finishing=true;
       try {
         const converting=a.source.kind==='folder' && dest?.kind==='normal';
@@ -709,8 +651,8 @@
     });
     listen('dragleave',event=>{if(active)event.stopImmediatePropagation();});
     listen('dragend',event=>{
-      if (nativeTile) {
-        nativeTile=null;
+      if (nativeTab) {
+        nativeTab=null;
         if (active) clear();
         return; // Zen started this drag and must release its native session.
       }
