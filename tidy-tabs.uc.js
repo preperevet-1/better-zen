@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.32
+// @version        0.14.33
 // ==/UserScript==
 (() => {
   'use strict';
@@ -426,7 +426,7 @@
       }
       const gap=ref ? (dest.after?ref.bottom:ref.top) : (dest.kind==='normal'?a.strip.getBoundingClientRect().bottom:a.pins.getBoundingClientRect().bottom);
       if (a.preview) {
-        a.preview.style.top=(a.y-a.height/2)+'px';
+        // Gecko draws the row under the pointer from the offscreen preview.
         for (const r of a.rows) for (const el of r.nodes) {
           el.style.setProperty('--ztt-drag-y',(r.top>=gap ? a.pitch : 0)+'px');
           el.setAttribute('ztt-slide','');
@@ -553,7 +553,7 @@
         const bounds=strip.getBoundingClientRect();
         const height=rows.find(r=>r.kind==='tab')?.height || 36;
         const preview=node('div','ztt-pin-drag-preview',source.item.label);
-        Object.assign(preview.style,{left:(bounds.left+4)+'px',width:(bounds.width-8)+'px',height:height+'px'});
+        Object.assign(preview.style,{left:'-10000px',top:'0px',width:(bounds.width-8)+'px',height:height+'px'});
         document.documentElement.append(preview);
         source.item.setAttribute('ztt-slot-preview','');
         active={source,strip,pins,rows,preview,moving:new Set(),height,pitch:height,
@@ -561,7 +561,7 @@
         sidebarDragging=true;
         gBrowser.tabContainer.tabDragAndDrop.clearDragOverVisuals?.();
         gZenPinnedTabManager.removeTabContainersDragoverClass?.();
-        event.dataTransfer.updateDragImage?.(blank,0,0);
+        event.dataTransfer.updateDragImage?.(preview,Math.max(0,event.clientX-bounds.left),height/2);
         return;
       }
       const mine=rows.find(r=>r.item===source.item);
@@ -577,11 +577,20 @@
       active.bottom=Math.min(rootBox.bottom,window.innerHeight);
       active.bottom=Math.max(active.bottom,active.top+Math.min(mine.height,rootBox.height));
       active.boundary=getState(strip).separator?.getBoundingClientRect().top??normalBox.top;
+      if (nativeTab) {
+        // Zen already owns the pointer image. Hide the source row while its
+        // neighbours animate, and keep the workspace viewport clipped.
+        source.item.setAttribute('ztt-slot-preview','');
+        sidebarDragging=true;
+        document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
+        return;
+      }
       active.unclipped=[];
       // Overflow alone is not enough: Zen also clips section paint and folder
       // contents using clip-path/contain. Restore every override after the drag.
       const parentOf=el=>el.assignedSlot||el.parentElement||el.getRootNode()?.host;
-      for (let parent=parentOf(source.item);parent && parent!==document.documentElement;parent=parentOf(parent)) {
+      for (let parent=parentOf(source.item);parent && parent!==gZenWorkspaces.activeWorkspaceElement &&
+           parent!==gBrowser.tabContainer && gZenWorkspaces.activeWorkspaceElement.contains(parent);parent=parentOf(parent)) {
         const css=getComputedStyle(parent);
         const scrolling=/auto|scroll/.test(css.overflowY)&&parent.scrollHeight>parent.clientHeight+1;
         const overrides={'clip-path':'none','contain':'none','mask-image':'none'};
@@ -599,10 +608,6 @@
       }
       sidebarDragging=true;
       document.getElementById('zen-folder-tabs-popup')?.hidePopup?.();
-      if (nativeTab) {
-        event.dataTransfer.updateDragImage?.(blank,0,0);
-        return;
-      }
       event.dataTransfer.effectAllowed='move';
       // Keep Gecko's drag source stable when a lazy tab loads and replaces its
       // label. This is transport data only; native movement handlers stay off.
