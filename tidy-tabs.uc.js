@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.41
+// @version        0.14.42
 // ==/UserScript==
 (() => {
   'use strict';
@@ -6702,6 +6702,9 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
         transition:background-color 110ms ease-out!important; }
     }
     #zen-library-footer [data-l10n-id="library-footer-donate-button"] { display:none!important; }
+    :root[ztt-hide-navigation] #navigator-toolbox :is(#back-button,#forward-button,#stop-reload-button,#reload-button,#stop-button) {
+      display:none!important;
+    }
     :is(#back-button,#forward-button,#reload-button) { position:relative; }
     :is(#back-button,#forward-button,#reload-button)::before {
       content:''; position:absolute; width:29px; height:29px; inset:0; margin:auto;
@@ -7296,10 +7299,18 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     },{signal:abort.signal});
     abort.signal.addEventListener('abort',()=>{hide();tip.remove();silent.remove();},{once:true});
   }
-  function installPlayerSettings() {
-    const pref = 'zen-tidy-tabs.show-mini-player';
-    const refresh = () => document.documentElement.toggleAttribute('ztt-hide-player', !Services.prefs.getBoolPref(pref,true));
-    Services.prefs.addObserver(pref,refresh);
+  function installModSettings() {
+    const settings = [
+      {pref:'zen-tidy-tabs.show-mini-player', defaultValue:true, hiddenAttr:'ztt-hide-player',
+        uk:'Показувати мініплеєр', en:'Show mini player'},
+      {pref:'zen-tidy-tabs.show-navigation-buttons', defaultValue:false, hiddenAttr:'ztt-hide-navigation',
+        uk:'Показувати кнопки «Назад», «Вперед» і «Перезавантажити»', en:'Show Back, Forward and Reload buttons'}
+    ];
+    const refresh = () => {
+      for (const {pref, defaultValue, hiddenAttr} of settings)
+        document.documentElement.toggleAttribute(hiddenAttr, !Services.prefs.getBoolPref(pref,defaultValue));
+    };
+    for (const {pref} of settings) Services.prefs.addObserver(pref,refresh);
     refresh();
 
     function attach(doc) {
@@ -7330,15 +7341,18 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
       pane.setAttribute('role','tabpanel');
       pane.setAttribute('aria-labelledby',category.id);
       const card = make('div','zen-settings-card');
-      const row = make('div','zen-settings-row zen-settings-toggle-row');
-      const text = make('span','zen-settings-row-text');
-      text.textContent = Services.locale.appLocaleAsBCP47.startsWith('uk') ? 'Показувати мініплеєр' : 'Show mini player';
-      const toggle = make('moz-toggle','zen-settings-toggle');
-      toggle.ariaLabel = text.textContent;
-      toggle.pressed = Services.prefs.getBoolPref(pref,true);
-      toggle.addEventListener('toggle',() => Services.prefs.setBoolPref(pref,toggle.pressed));
-      row.append(text,toggle);
-      card.append(row);
+      const ukrainian = Services.locale.appLocaleAsBCP47.startsWith('uk');
+      for (const {pref, defaultValue, uk, en} of settings) {
+        const row = make('div','zen-settings-row zen-settings-toggle-row');
+        const text = make('span','zen-settings-row-text');
+        text.textContent = ukrainian ? uk : en;
+        const toggle = make('moz-toggle','zen-settings-toggle');
+        toggle.ariaLabel = text.textContent;
+        toggle.pressed = Services.prefs.getBoolPref(pref,defaultValue);
+        toggle.addEventListener('toggle',() => Services.prefs.setBoolPref(pref,toggle.pressed));
+        row.append(text,toggle);
+        card.append(row);
+      }
       pane.append(card);
       panes.append(pane);
       const titleObserver = new win.MutationObserver(() => {
@@ -7358,8 +7372,10 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     for (const win of Services.wm.getEnumerator('Zen:Settings')) attach(win.document);
     abort.signal.addEventListener('abort',() => {
       Services.obs.removeObserver(opened,'chrome-document-loaded');
-      Services.prefs.removeObserver(pref,refresh);
-      document.documentElement.removeAttribute('ztt-hide-player');
+      for (const {pref, hiddenAttr} of settings) {
+        Services.prefs.removeObserver(pref,refresh);
+        document.documentElement.removeAttribute(hiddenAttr);
+      }
     },{once:true});
   }
 
@@ -7371,7 +7387,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     Services.prefs.setBoolPref('zen.splitView.enable-drag-over-split',false);
     Services.prefs.setBoolPref('zen.pinned-tab-manager.restore-pinned-tabs-to-pinned-url',true);
     gBrowser.tabContainer.tabDragAndDrop._clearDragOverSplit?.();
-    installPlayerSettings();
+    installModSettings();
     installPlaybackIndicators();
     installPinnedBehavior();
     installCreateMenu();
