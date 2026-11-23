@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.40
+// @version        0.14.41
 // ==/UserScript==
 (() => {
   'use strict';
@@ -87,6 +87,14 @@
     if (text) el.textContent = text;
     return el;
   };
+  function revealRows(tabs) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (const tab of tabs) {
+      tab.querySelector('.tab-label')?.animate(
+        [{opacity:0,translate:'0 -5px'}, {opacity:1,translate:'0 0'}],
+        {duration:110,easing:'ease-out'});
+    }
+  }
   function report(error) {
     console.error('[Zen Tidy Tabs]', error);
     Services.prompt.alert(window, 'Tidy Tabs', 'Unable to complete action: ' + error.message);
@@ -100,10 +108,14 @@
   const {SessionStore} = ChromeUtils.importESModule('moz-src:///browser/components/sessionstore/SessionStore.sys.mjs');
   const sessionKey = 'zen-tidy-tabs-group-v1';
   const manualTabs = new WeakSet();
-  function saveGroup(tab, name) {
-    if (name) {
+  const placedLoose = new WeakSet();
+  function saveGroup(tab, name, keepPosition = false) {
+    if (keepPosition) placedLoose.add(tab);
+    else placedLoose.delete(tab);
+    if (!name) manualTabs.delete(tab);
+    if (name || keepPosition) {
       const workspace = tab.getAttribute('zen-workspace-id') || gZenWorkspaces.activeWorkspace;
-      SessionStore.setCustomTabValue(tab, sessionKey, JSON.stringify({workspace,name,manual:manualTabs.has(tab)}));
+      SessionStore.setCustomTabValue(tab, sessionKey, JSON.stringify({workspace,name,manual:manualTabs.has(tab),keepPosition}));
     } else {
       manualTabs.delete(tab);
       SessionStore.deleteCustomTabValue(tab, sessionKey);
@@ -115,7 +127,8 @@
       const value = SessionStore.getCustomTabValue(tab, sessionKey);
       if (!value) continue;
       try {
-        const {name, workspace, manual} = JSON.parse(value);
+        const {name, workspace, manual, keepPosition} = JSON.parse(value);
+        if (keepPosition && workspace === gZenWorkspaces.activeWorkspace) placedLoose.add(tab);
         if (workspace === gZenWorkspaces.activeWorkspace && typeof name === 'string' && name.length && name.length <= 60) {
           if (manual) manualTabs.add(tab);
           const topic = manual ? name : /^(?:https?:|www\.)|^(?:[\w-]+\.)+[a-z]{2,}$/i.test(name) ? classify({url:tab.linkedBrowser?.currentURI?.spec,title:tab.label}) : name === 'Games' ? 'Gaming' : name;
@@ -272,7 +285,7 @@
       if (!eligible(row, strip)) continue;
       if (targetTopic) state.assignments.set(row, targetTopic);
       else state.assignments.delete(row);
-      saveGroup(row, targetTopic || null);
+      saveGroup(row, targetTopic || null, !targetTopic);
     }
     for (const tab of tabs) {
       if (!eligible(tab, strip) && state.assignments.delete(tab)) saveGroup(tab, null);
@@ -734,28 +747,10 @@
       // colour changes, or the space turns light or dark)
       observeWith(MutationObserver, schedule).observe(tabs, { subtree: true, attributes: true, attributeFilter: ["zia-folder-color"] });
       observeWith(MutationObserver, schedule).observe(root, { attributes: true, attributeFilter: ["zia-light"] });
-      // An empty folder opens by sliding its slot down into view, as a folder
-      // does its tabs. Emptied (its last tab dragged out) and shut, Zen had
-      // measured it with no slot showing, so it was only 4px up out of view
-      // and opened with a snap. It's put a slot's height up before Zen opens it.
-      listen(window, 
-        "TabGroupExpand",
-        (event) => {
-          const folder = event.target;
-          if (folder?.localName !== "zen-folder" || !folder.hasAttribute("zia-empty")) {
-            return;
-          }
-          const start = folder.groupStartElement;
-          if (!start) {
-            return;
-          }
-          const room = rootPx("--zia-slot-h", 35) + rootPx("--zia-slot-mt", 2) + rootPx("--zia-slot-mb", 2);
-          if ((parseFloat(getComputedStyle(start).marginTop) || 0) > -room) {
-            start.style.marginTop = `${-(room + 4)}px`;
-          }
-        },
-        true
-      );
+      listen(window, "TabGroupExpand", event => {
+        const folder = event.target;
+        if (folder.localName === "zen-folder") revealRows(folder.tabs || []);
+      }, true);
       for (const type of ["TabGroupCreate", "TabGrouped", "TabUngrouped", "TabClose", "TabMove", "TabGroupExpand"]) {
         listen(gBrowser.tabContainer, type, schedule);
       }
@@ -2171,6 +2166,7 @@
           moveInOrder(state.strip, loose.concat(blocks.flatMap(block => block.tabs)));
           render(state.strip);
         }
+        if (!commit || !state.pin) revealRows(state.blocks[state.from].tabs);
         schedule();
       };
       listen(window, 'pointerdown', event => {
@@ -4694,6 +4690,7 @@
                     gBrowser.removeTab(placeholder, {animate:false});
                   }
                   assignManual(strip,tabs,name);
+                  revealRows(tabs);
                 } catch (error) { report(error); }
               }, 0);
               return;
@@ -5518,10 +5515,10 @@
     for (const name of s.assignments.values()) counts.set(name, (counts.get(name) || 0) + 1);
     for (const [tab, name] of s.assignments) if (counts.get(name) < 2 && !manualTabs.has(tab)) { s.assignments.delete(tab); saveGroup(tab,null); }
     const current = tabsIn(strip);
-    const loose = current.filter(tab => !s.assignments.has(tab));
+    const loose = current.filter(tab => !s.assignments.has(tab) && !placedLoose.has(tab));
     const blocks = new Map();
     for (const tab of current) {
-      const name = s.assignments.get(tab);
+      const name = s.assignments.get(tab) || (placedLoose.has(tab) && tab);
       if (!name) continue;
       if (!blocks.has(name)) blocks.set(name, []);
       blocks.get(name).push(tab);
@@ -6639,11 +6636,8 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     }
     .ztt-fold-trace { position:fixed; z-index:2147483647; display:block; align-content:center;
       pointer-events:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    #tabbrowser-tabs zen-folder[zia-empty]:not([collapsed]) > .tab-group-container {
-      min-block-size:var(--zia-slot-h,var(--tab-min-height,35px))!important;
-    }
-    #tabbrowser-tabs zen-folder[zia-empty] > .tab-group-container::after {
-      background:none!important; animation:none!important;
+    #tabbrowser-tabs zen-folder[zia-empty] > .tab-group-container {
+      display:none!important;
     }
     #tabbrowser-tabs .tabbrowser-tab[ztt-topic-folded] { display:none!important; }
     #tabbrowser-tabs .ztt-header[zia-dragging] .ztt-group-close { opacity:.75!important; }
