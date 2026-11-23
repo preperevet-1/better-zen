@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.36
+// @version        0.14.37
 // ==/UserScript==
 (() => {
   'use strict';
@@ -441,8 +441,6 @@
       return all[0] || null;
     }
     const FOLDER_SELECTOR = "zen-folder, tab-group:not([split-view-group])";
-    const DEFAULT_TAB_ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGZpbGw9Im5vbmUiIHZpZXdCb3g9IjE4NCAxODQgNjU3IDY1NyI+CiAgPGNpcmNsZSBjeD0iNTEyLjQzOSIgY3k9IjUxMi40MzkiIHI9IjExMy4wMiIgc3Ryb2tlPSIjNmI2YjZiIiBzdHJva2Utd2lkdGg9IjI1LjE5NTMiLz4KICA8Y2lyY2xlIGN4PSI1MTIuNDM5IiBjeT0iNTEyLjQzOSIgcj0iMTk3LjczNyIgc3Ryb2tlPSIjNmI2YjZiIiBzdHJva2Utd2lkdGg9IjQxLjk5MjIiLz4KICA8Y2lyY2xlIGN4PSI1MTIuNDM5IiBjeT0iNTEyLjQzOSIgcj0iMjk4LjI2NiIgc3Ryb2tlPSIjNmI2YjZiIiBzdHJva2Utd2lkdGg9IjU4Ljc4OTEiLz4KPC9zdmc+Cg==";
-    const DRAG_PICTURE_W = 200, DRAG_PICTURE_H = 125;
 
     function isEmptyFolder(folder) {
       const container = folder.querySelector(":scope > .tab-group-container");
@@ -1536,6 +1534,7 @@
         }
         node.removeAttribute("zia-dragging");
         node.removeAttribute("ztt-folder-target");
+        node.style.removeProperty("--ztt-folder-inset");
         node.removeAttribute("zia-shift");
       };
 
@@ -1621,7 +1620,10 @@
         }
         drag.slot?.removeAttribute("zia-drop-slot");
         drag.slot = folder || null;
-        if (!drag.folder) drag.moving?.toggleAttribute("ztt-folder-target", !!folder);
+        if (!drag.folder) {
+          if (folder) drag.moving.style.setProperty("--ztt-folder-inset", drag.moving.getBoundingClientRect().width * .1 + "px");
+          drag.moving.toggleAttribute("ztt-folder-target", !!folder);
+        }
         folder?.setAttribute("zia-drop-slot", "true");
         // The folder it came from loses its highlight once it's dragged out (Firefox kept
         // it hovered until the mouse next moved, after the drop), and regains it coming back
@@ -1944,15 +1946,8 @@
           };
         }
         const base = drag.folderBase;
-        // (back among the rows it started in, it's its own width again)
-        const startedIn = moving.parentElement?.closest?.(FOLDER_SELECTOR) || null;
-        const want = into || startedIn ? widthFor(into) : null;
-        let start = want ? want.left - base.box.left : 0;
-        let end = want ? base.box.right - want.right : 0;
-        if (Math.abs(start) > 60 || Math.abs(end) > 60) {
-          start = 0;
-          end = 0;
-        }
+        const inset = into ? (base.box.right - base.box.left) * 0.1 : 0;
+        const start = inset, end = inset;
         moving.setAttribute("zia-morph-folder", "true");
         // eased frame by frame (the drag's own rules turn transitions off)
         const from = drag.folderShown || { start: base.start, end: base.end };
@@ -1977,7 +1972,8 @@
             requestAnimationFrame(step);
           }
         };
-        requestAnimationFrame(step);
+        if (matchMedia("(prefers-reduced-motion: reduce)").matches) draw(to);
+        else requestAnimationFrame(step);
       };
       const unmorphFolder = (folder) => {
         if (!folder?.hasAttribute?.("zia-morph-folder")) {
@@ -2133,10 +2129,8 @@
         const section = sep.parentElement;
         if (event.clientX < box.left || event.clientX > box.right ||
             event.clientY > box.bottom || event.clientY < (grid?.bottom || section.getBoundingClientRect().top)) return null;
-        for (const item of section.children) {
-          if (!item.matches('zen-folder,tab-group,.tabbrowser-tab:not([zen-empty-tab])')) continue;
-          const row = item.getBoundingClientRect();
-          if (row.height && event.clientY < row.top + row.height / 2) return item;
+        for (const {item, mid} of topicDrag.pinnedRows) {
+          if (event.clientY < mid) return item;
         }
         return sep;
       }
@@ -2146,6 +2140,7 @@
         topicDrag = null;
         if (state.header.hasPointerCapture(state.pointer)) state.header.releasePointerCapture(state.pointer);
         if (!state.started) return;
+        state.header.removeAttribute("ztt-pin-preview");
         root.removeAttribute('ztt-moving-topic');
         clearMoved();
         if (commit && state.strip === activeStrip() && state.pin) {
@@ -2172,7 +2167,12 @@
         });
         const from = blocks.findIndex(block => block.node === header);
         if (from < 0) return;
-        topicDrag = {header, strip, blocks, from, to:from, y:event.clientY, pointer:event.pointerId};
+        const sep = currentSeparator();
+        const pinnedRows = Array.from(sep?.parentElement.children || [])
+          .filter(el => el.matches('zen-folder,tab-group,.tabbrowser-tab:not([zen-empty-tab])'))
+          .map(item => { const r = item.getBoundingClientRect(); return {item,mid:r.top+r.height/2,height:r.height}; })
+          .filter(row => row.height > 0);
+        topicDrag = {header, strip, blocks, pinnedRows, from, to:from, y:event.clientY, pointer:event.pointerId};
       }, true);
       listen(window, 'pointermove', event => {
         const state = topicDrag;
@@ -2196,6 +2196,13 @@
           if (index > from && own.bottom + dy > mid) to = Math.max(to,index);
         }
         state.to = to;
+        let opening = false;
+        const gap = state.pinnedRows.find(row => row.item === state.pin)?.item.querySelector('.tab-group-label-container')?.getBoundingClientRect().height || own.tabs[0]?.getBoundingClientRect().height || 40;
+        for (const {item} of state.pinnedRows) {
+          if (item === state.pin) opening = true;
+          place(item, opening ? gap : 0, false);
+        }
+        state.header.toggleAttribute("ztt-pin-preview", !!state.pin);
         const height = blocks[from + 1] ? blocks[from + 1].top - own.top : own.bottom - own.top;
         for (const [index, block] of blocks.entries()) {
           const shift = index === from ? dy : index >= to && index < from ? height :
@@ -2282,7 +2289,11 @@
             below ? visualMid > mid : visualMid < mid;
           place(node, crossed ? (below ? -drag.pitch : drag.pitch) : 0, false);
         }
-        place(moving, dy, true);
+        const lastBottom = drag.rows.reduce((bottom,row) => Math.max(bottom,row.top + row.height), drag.origin + drag.height);
+        const viewport = gBrowser.tabContainer.getBoundingClientRect();
+        const limit = Math.min(viewport.bottom, lastBottom) - drag.origin - drag.height;
+        drag.shownDy = Math.min(dy, Math.max(0, limit));
+        place(moving, drag.shownDy, true);
 
         // New Tab at the foot of the list, when the list closes up (only if the
         // row taken out was above it)
@@ -3220,103 +3231,6 @@
         });
       };
 
-      const THUMB_MS = 150;
-      let thumb = null;
-      let thumbTimer = 0;
-
-      const pictureSource = () => {
-        const source = document.getElementById("zia-split-drag-picture");
-        return source?.width ? source : null;
-      };
-      const pictureSize = () => {
-        const source = pictureSource();
-        const width = parseFloat(source?.style.width) || DRAG_PICTURE_W;
-        const height = parseFloat(source?.style.height) || DRAG_PICTURE_H;
-        return { width, height };
-      };
-
-      const fillPicture = (node, tab) => {
-        if (!node) {
-          return;
-        }
-        const source = pictureSource();
-        if (source) {
-          let canvas = node.querySelector("canvas");
-          if (!canvas) {
-            canvas = document.createElementNS(XHTML_NS, "canvas");
-            node.replaceChildren(canvas);
-          }
-          if (canvas.width !== source.width || canvas.height !== source.height) {
-            canvas.width = source.width;
-            canvas.height = source.height;
-          }
-          const ctx = canvas.getContext("2d");
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(source, 0, 0);
-          node.removeAttribute("zia-card");
-        } else if (!node.firstChild && tab) {
-          const icon = document.createElementNS(XHTML_NS, "img");
-          icon.setAttribute("src", gBrowser.getIcon(tab) || DEFAULT_TAB_ICON);
-          node.replaceChildren(icon);
-          node.setAttribute("zia-card", "true");
-        }
-      };
-      const fillThumb = () => fillPicture(thumb, drag?.tab);
-
-      const sizeThumb = (node, width, height) => {
-        node.style.width = `${Math.round(width)}px`;
-        node.style.height = `${Math.round(height)}px`;
-      };
-      // sized to a box and centred on it (it's drawn from its middle)
-      const fitThumb = (node, box) => {
-        sizeThumb(node, box.width, box.height);
-        node.style.left = `${Math.round(box.left + box.width / 2)}px`;
-        node.style.top = `${Math.round(box.top + box.height / 2)}px`;
-      };
-
-      const showThumb = (x, y) => {
-        clearTimeout(thumbTimer);
-        if (!thumb) {
-          thumb = document.createElementNS(XHTML_NS, "div");
-          thumb.id = "zia-drag-thumb";
-          fitThumb(thumb, (bgOf(drag.tab) || drag.moving).getBoundingClientRect());
-          root.appendChild(thumb);
-          thumb.getBoundingClientRect();
-        }
-        fillThumb();
-        thumb.removeAttribute("zia-leaving");
-        const size = pictureSize();
-        sizeThumb(thumb, size.width, size.height);
-        thumb.style.left = `${Math.round(x)}px`;
-        thumb.style.top = `${Math.round(y)}px`;
-        if (!drag.moving.hasAttribute("zia-drag-away")) {
-          tap();
-        }
-        drag.moving.setAttribute("zia-drag-away", "true");
-      };
-
-      const hideThumb = (instant = false) => {
-        if (!thumb || thumb.hasAttribute("zia-leaving")) {
-          return;
-        }
-        const leaving = thumb;
-        const moving = drag?.moving;
-        const done = () => {
-          leaving.remove();
-          if (thumb === leaving) {
-            thumb = null;
-          }
-          moving?.removeAttribute("zia-drag-away");
-        };
-        if (instant || !moving?.isConnected) {
-          done();
-          return;
-        }
-        leaving.setAttribute("zia-leaving", "true");
-        fitThumb(leaving, (bgOf(drag.tab) || moving).getBoundingClientRect());
-        thumbTimer = setTimeout(done, THUMB_MS);
-      };
-
       const noLanding = () => {
         const dnd = gBrowser.tabContainer.tabDragAndDrop;
         if (!dnd || dnd._landDragImageOnElements?.ziaQuiet) {
@@ -3759,12 +3673,9 @@
             drag.essentials = false;
             setFlag("zia-drag-over-essentials", false);
             hideProxy();
-            if (!drag.folder && !drag.split) {
-              showThumb(point.x, point.y);
-            }
+            setDropSlot(null);
             return;
           }
-          hideThumb();
           const essentials =
             document.getElementById("zen-essentials") ||
             window.gZenWorkspaces?.getCurrentEssentialsContainer?.() ||
@@ -4221,6 +4132,7 @@
         }
         listRoom.folder?.removeAttribute("zia-drop-slot");
         listRoom.folder = folder || null;
+        if (folder && essentialDrag?.copy) essentialDrag.copy.style.setProperty("--ztt-folder-inset", essentialDrag.copy.getBoundingClientRect().width * .1 + "px");
         essentialDrag?.copy?.toggleAttribute("ztt-folder-target", !!folder);
         folder?.setAttribute("zia-drop-slot", "true");
       };
@@ -4461,44 +4373,6 @@
         }
       };
 
-      // An essential dragged out over the page (to the split cards) turns into
-      // its page's picture, as a tab does, and back into its tile coming back
-      // (it stayed a tile out there)
-      const essentialThumb = (state, point) => {
-        if (!state.thumb || state.thumb.hasAttribute("zia-leaving")) {
-          clearTimeout(state.thumbTimer);
-          state.thumb?.remove();
-          const node = document.createElementNS(XHTML_NS, "div");
-          node.id = "zia-drag-thumb";
-          fitThumb(node, state.copy.getBoundingClientRect());
-          root.appendChild(node);
-          node.getBoundingClientRect();
-          state.thumb = node;
-          state.copy.setAttribute("zia-over-page", "true");
-          tap();
-        }
-        fillPicture(state.thumb, state.tab);
-        const size = pictureSize();
-        sizeThumb(state.thumb, size.width, size.height);
-        state.thumb.style.left = `${Math.round(point.x)}px`;
-        state.thumb.style.top = `${Math.round(point.y)}px`;
-      };
-      const essentialThumbBack = (state) => {
-        const node = state.thumb;
-        if (!node || node.hasAttribute("zia-leaving")) {
-          return;
-        }
-        node.setAttribute("zia-leaving", "true");
-        fitThumb(node, state.copy.getBoundingClientRect());
-        state.thumbTimer = setTimeout(() => {
-          node.remove();
-          if (state.thumb === node) {
-            state.thumb = null;
-            state.copy?.removeAttribute("zia-over-page");
-          }
-        }, THUMB_MS);
-      };
-
       const onEssentialOver = (event) => {
         const state = essentialDrag;
         if (!state?.copy?.isConnected) {
@@ -4510,10 +4384,10 @@
         }
         const sideBox = document.getElementById("navigator-toolbox")?.getBoundingClientRect();
         if (sideBox?.width && !event.target?.closest?.("#navigator-toolbox") && (point.x < sideBox.left || point.x > sideBox.right)) {
-          essentialThumb(state, point);
+          state.copy.setAttribute("zia-over-page","true");
           return;
         }
-        essentialThumbBack(state);
+        state.copy.removeAttribute("zia-over-page");
         tapOnNewTile(point, state.tab);
         const essentials = document.getElementById("zen-essentials");
         const overTiles = !!event.target?.closest?.("#zen-essentials") || inBox(essentials, point) || overAnyTile(point);
@@ -4607,9 +4481,6 @@
         if (!state) {
           return;
         }
-        clearTimeout(state.thumbTimer);
-        state.thumb?.remove();
-        state.thumb = null;
         if (event?.type === "drop") {
           const point = pointerOf(event);
           const essentials = document.getElementById("zen-essentials");
@@ -4706,7 +4577,7 @@
           return;
         }
         if (moving.style.getPropertyPriority("transform") !== "important") {
-          place(moving, lastDy, true);
+          place(moving, drag.shownDy ?? 0, true);
         }
       });
 
@@ -5130,7 +5001,6 @@
         } catch (err) {
           noteError("tab dragging: Zen's picture back", err);
         }
-        hideThumb(true);
         if (raf) cancelAnimationFrame(raf);
         raf = 0;
         clearMoved();
@@ -5163,7 +5033,6 @@
           releaseToZen(event);
           return;
         }
-        hideThumb(true);
         if (raf) cancelAnimationFrame(raf);
         raf = 0;
         clearMoved();
@@ -5283,7 +5152,6 @@
           clearFolderPaint();
         }
         dropProxy();
-        hideThumb(true);
         document.querySelectorAll("[zia-drag-away]").forEach((node) => node.removeAttribute("zia-drag-away"));
         makeRoom(null);
         holdSplitSlot(false);
@@ -5570,7 +5438,7 @@
       busy = false;
       s.separator?.classList.remove('ztt-working');
       if (s.tidyButton) { s.tidyButton.disabled = false; s.tidyButton.removeAttribute('aria-busy'); }
-      if (!destroyed) render(strip);
+      if (!destroyed) render(strip,true);
     }
   }
   function unmountControl(s) {
@@ -5603,7 +5471,7 @@
     tidyButton.hidden = tabsIn(strip).length < 5;
     return true;
   }
-  function render(strip) {
+  function render(strip, animateNames = false) {
     const s = getState(strip);
     mountControl(strip, s);
     restoreGroups(strip,s);
@@ -5647,7 +5515,7 @@
           });
           header.tabIndex = 0;
           header.addEventListener('contextmenu', event => openGroupMenu(event,strip,name));
-          if (!s.revealed.has(name) && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          if (animateNames && !s.revealed.has(name) && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
             s.revealed.add(name);
             label.replaceChildren(...Array.from(name,(letter,index) => {
               const glyph = node('span','ztt-letter',letter);
@@ -6519,65 +6387,6 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
   opacity: 0 !important;
 }
 
-#zia-drag-thumb {
-  position: fixed;
-  z-index: 2147483647;
-  translate: -50% -50%;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  border-radius: 7px;
-  background-color: #1f1f1f;
-  overflow: hidden;
-  transition: width 150ms ease-out, height 150ms ease-out;
-
-  &[zia-leaving] {
-    transition: width 150ms ease-out, height 150ms ease-out, left 150ms ease-out, top 150ms ease-out;
-  }
-
-  &[zia-card] {
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
-  }
-
-  & > canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-
-  & > img {
-    width: 24px;
-    height: 24px;
-  }
-
-  /* as Dia's morphs: the page's picture comes into focus out of a blur as
-     the row grows into it, and blurs away as it shrinks back */
-  @media (prefers-reduced-motion: no-preference) {
-    & > * {
-      animation: zia-morph-focus 150ms ease-out backwards;
-      transition: filter 120ms ease-in, opacity 120ms ease-in;
-    }
-
-    &[zia-leaving] > * {
-      filter: blur(6px);
-      opacity: 0;
-    }
-  }
-}
-
-@keyframes zia-morph-focus {
-  from {
-    filter: blur(6px);
-    opacity: 0;
-  }
-}
-
-#zia-split-drag-picture {
-  visibility: hidden !important;
-}
-
 :root #tabbrowser-tabs:is([zia-settling], [movingtab]) .tabbrowser-tab[zia-to-essential],
 :root #tabbrowser-tabs .tabbrowser-tab[zia-to-essential][zia-dragging],
 .tabbrowser-tab[zia-to-essential],
@@ -6777,20 +6586,19 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
   }
 }
 
-    :is(.tabbrowser-tab[zia-dragging], .tabbrowser-tab[zia-essential-proxy]:not([zen-essential])) > .tab-stack,
-    tab-group[split-view-group][zia-dragging] > .tab-group-container {
-      transform-origin:center!important; scale:1 1!important;
-      transition:scale 180ms cubic-bezier(.2,.8,.2,1)!important;
+    #tabbrowser-tabs :is(.tabbrowser-tab,tab-group[split-view-group])[zia-dragging],
+    .tabbrowser-tab[zia-essential-proxy]:not([zen-essential]) {
+      box-sizing:border-box!important;
+      transition:padding-inline 180ms cubic-bezier(.2,.8,.2,1)!important;
     }
-    #tabbrowser-tabs .tabbrowser-tab[zia-dragging][ztt-folder-target] > .tab-stack,
-    .tabbrowser-tab[zia-essential-proxy][ztt-folder-target]:not([zen-essential]) > .tab-stack,
-    #tabbrowser-tabs tab-group[split-view-group][ztt-folder-target] > .tab-group-container {
-      scale:.8 1!important;
+    #tabbrowser-tabs :is(.tabbrowser-tab,tab-group[split-view-group])[zia-dragging][ztt-folder-target],
+    .tabbrowser-tab[zia-essential-proxy][ztt-folder-target]:not([zen-essential]) {
+      padding-inline:var(--ztt-folder-inset)!important;
     }
     @media (prefers-reduced-motion:reduce) {
-      :is(.tabbrowser-tab[zia-dragging], .tabbrowser-tab[zia-essential-proxy]) > .tab-stack,
-      tab-group[split-view-group][zia-dragging] > .tab-group-container { transition:none!important; }
+      #tabbrowser-tabs [zia-dragging], .tabbrowser-tab[zia-essential-proxy] { transition:none!important; }
     }
+    :root[ztt-moving-topic] .ztt-header[ztt-pin-preview] ~ .tabbrowser-tab[zia-dragging] { visibility:hidden!important; }
     .ztt-header { user-select:none; touch-action:none; }
     #tabbrowser-tabs .ztt-header[zia-shift] { transition:transform 100ms ease-out!important; }
     #tabbrowser-tabs .ztt-header[zia-dragging] { transition:none!important; }
