@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.38
+// @version        0.14.39
 // ==/UserScript==
 (() => {
   'use strict';
@@ -264,7 +264,7 @@
   }
   // Tidy headings are siblings of native rows. Record the section Zia
   // actually placed the tabs in before the next Tidy render restores groups.
-  function syncDroppedTopic(tabs) {
+  function syncDroppedTopic(tabs, targetTopic) {
     const strip = activeStrip();
     const state = states.get(strip);
     if (!state) return;
@@ -273,9 +273,10 @@
     for (const row of strip.children) {
       if (state.headers.includes(row)) topic = row.dataset.zttGroup;
       if (!dropped.has(row) || !eligible(row, strip)) continue;
-      if (topic) state.assignments.set(row, topic);
+      const name = targetTopic || topic;
+      if (name) state.assignments.set(row, name);
       else state.assignments.delete(row);
-      saveGroup(row, topic);
+      saveGroup(row, name);
     }
     for (const tab of tabs) {
       if (!eligible(tab, strip) && state.assignments.delete(tab)) saveGroup(tab, null);
@@ -1614,16 +1615,19 @@
 
       const topLevel = (row) => (row.node.classList?.contains("tab-group-label-container") ? row.node.parentElement : row.node);
 
-      const setDropSlot = (folder) => {
+      const setDropSlot = (folder, topic = null) => {
+        if (drag && !drag.folder) {
+          const narrow = !!(folder || topic);
+          if (narrow && !drag.moving.hasAttribute("ztt-folder-target")) {
+            drag.moving.style.setProperty("--ztt-folder-inset", drag.moving.getBoundingClientRect().width * .1 + "px");
+          }
+          drag.moving.toggleAttribute("ztt-folder-target", narrow);
+        }
         if (!drag || drag.slot === folder) {
           return;
         }
         drag.slot?.removeAttribute("zia-drop-slot");
         drag.slot = folder || null;
-        if (!drag.folder) {
-          if (folder) drag.moving.style.setProperty("--ztt-folder-inset", drag.moving.getBoundingClientRect().width * .1 + "px");
-          drag.moving.toggleAttribute("ztt-folder-target", !!folder);
-        }
         folder?.setAttribute("zia-drop-slot", "true");
         // The folder it came from loses its highlight once it's dragged out (Firefox kept
         // it hovered until the mouse next moved, after the drop), and regains it coming back
@@ -1787,14 +1791,16 @@
         // top of the list, below the first folder or back where it came from)
         // (and several selected tabs: Firefox placed them by its measure of the list, which the
         // drag had shifted, and two dragged a few rows down went to the end of it)
-        const hand = !!(drag.folder || drag.split || folder || pf || (nf && isFolderStart(next, nf)) || crosses || drag.companions);
+        const topic = below && !folder && !drag.folder && !drag.split
+          ? drag.headings.findLast(({mid}) => visualMid >= mid)?.node.dataset.zttGroup : null;
+        const hand = !!(topic || drag.folder || drag.split || folder || pf || (nf && isFolderStart(next, nf)) || crosses || drag.companions);
         // a tap going into or out of a folder (Zen's own are muted during a drag), not for
         // the one it's in as it starts
         if (drag.target && folder !== drag.target.folder) {
           tap();
         }
-        drag.target = { folder, atEnd, first: !!first, prev, next, below, sameNext: same(next), slotTop, hand };
-        setDropSlot(folder);
+        drag.target = { folder, topic, atEnd, first: !!first, prev, next, below, sameNext: same(next), slotTop, hand };
+        setDropSlot(folder, topic);
       };
 
       const paintedFolders = new Set();
@@ -2271,14 +2277,14 @@
         folder.style.setProperty("transform", kept, keptPriority);
         strip?.removeAttribute("zia-measuring");
         const mine = rows.find((row) => row.node === folder || folder.contains(row.node));
-        const sep = currentSeparator();
         drag.rows = rows;
         drag.origin = box.top;
         drag.height = box.height;
         drag.pitch = box.height;
         drag.index = mine?.index ?? drag.index;
         drag.shifted = new Set();
-        drag.sepTop = sep ? sep.getBoundingClientRect().top : null;
+        // Keep the original divider boundary while the folder height settles.
+        // Its animated rectangle can already be a full folder-height above it.
       };
 
       const apply = (dy) => {
@@ -2304,7 +2310,9 @@
         }
         const lastBottom = drag.rows.reduce((bottom,row) => Math.max(bottom,row.top + row.height), drag.origin + drag.height);
         const viewport = gBrowser.tabContainer.getBoundingClientRect();
-        const limit = Math.min(viewport.bottom, lastBottom) - drag.origin - drag.height;
+        // A pinned folder can land in an empty normal section below the last row.
+        const bottom = drag.folder ? document.getElementById("navigator-toolbox").getBoundingClientRect().bottom : Math.min(viewport.bottom, lastBottom);
+        const limit = bottom - drag.origin - drag.height;
         drag.shownDy = Math.min(dy, Math.max(0, limit));
         place(moving, drag.shownDy, true);
 
@@ -2395,7 +2403,7 @@
           const upTo = drag.sepTop + drag.pitch * 0.8 + (drag.sepDelta ? 4 : 0);
           if (startedBelow && visualMid < upTo) {
             sepDelta = drag.pitch;
-          } else if (!startedBelow && visualMid > drag.sepTop + 2) {
+          } else if (!startedBelow && visualMid > drag.sepTop + (drag.sepDelta ? -4 : 4)) {
             sepDelta = -drag.pitch;
           }
           // crossing the separator taps like a row moving does
@@ -4716,7 +4724,7 @@
             const run = () => {
               try {
                 finishDrop(tab, target, party);
-                syncDroppedTopic(party || [tab]);
+                syncDroppedTopic(party || [tab], target.topic);
                 // (its width put right as it moves: the row's new width showed
                 // first otherwise, 14px narrower)
                 refitLanding?.();
@@ -6610,6 +6618,9 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     }
     @media (prefers-reduced-motion:reduce) {
       #tabbrowser-tabs [zia-dragging], .tabbrowser-tab[zia-essential-proxy] { transition:none!important; }
+    }
+    :root[zia-dragging-tab] .zen-workspace-pinned-tabs-section:has(zen-folder[zia-dragging]) {
+      overflow:visible!important; clip-path:none!important;
     }
     #tabbrowser-tabs .tabbrowser-tab[ztt-topic-folded] { display:none!important; }
     #tabbrowser-tabs .ztt-header[zia-dragging] .ztt-group-close { opacity:.75!important; }
