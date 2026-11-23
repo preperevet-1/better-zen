@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.37
+// @version        0.14.38
 // ==/UserScript==
 (() => {
   'use strict';
@@ -2124,7 +2124,7 @@
       function pinnedDestination(event) {
         const sep = currentSeparator();
         if (!sep) return null;
-        const box = sep.getBoundingClientRect();
+        const box = topicDrag.sepBox;
         const grid = gZenWorkspaces.getCurrentEssentialsContainer?.()?.getBoundingClientRect();
         const section = sep.parentElement;
         if (event.clientX < box.left || event.clientX > box.right ||
@@ -2140,7 +2140,7 @@
         topicDrag = null;
         if (state.header.hasPointerCapture(state.pointer)) state.header.releasePointerCapture(state.pointer);
         if (!state.started) return;
-        state.header.removeAttribute("ztt-pin-preview");
+        for (const tab of state.blocks[state.from].tabs) tab.removeAttribute("ztt-topic-folded");
         root.removeAttribute('ztt-moving-topic');
         clearMoved();
         if (commit && state.strip === activeStrip() && state.pin) {
@@ -2172,7 +2172,7 @@
           .filter(el => el.matches('zen-folder,tab-group,.tabbrowser-tab:not([zen-empty-tab])'))
           .map(item => { const r = item.getBoundingClientRect(); return {item,mid:r.top+r.height/2,height:r.height}; })
           .filter(row => row.height > 0);
-        topicDrag = {header, strip, blocks, pinnedRows, from, to:from, y:event.clientY, pointer:event.pointerId};
+        topicDrag = {header, strip, blocks, pinnedRows, sepBox:sep?.getBoundingClientRect(), from, to:from, y:event.clientY, pointer:event.pointerId};
       }, true);
       listen(window, 'pointermove', event => {
         const state = topicDrag;
@@ -2180,34 +2180,47 @@
         if (!event.buttons) { endTopic(false); return; }
         const {blocks, from} = state;
         const own = blocks[from];
-        const dy = Math.min(blocks.at(-1).bottom - own.bottom, event.clientY - state.y);
+        const pointerDelta = event.clientY - state.y;
         state.pin = pinnedDestination(event);
         if (!state.started) {
-          if (Math.abs(dy) < 4) return;
+          if (Math.abs(pointerDelta) < 4) return;
           state.started = true;
           state.header.setPointerCapture(event.pointerId);
           root.setAttribute('ztt-moving-topic', '');
+          for (const tab of own.tabs) tab.setAttribute('ztt-topic-folded','');
+          for (const block of blocks) {
+            const headerBox = block.node.getBoundingClientRect();
+            block.top = headerBox.top - parseFloat(getComputedStyle(block.node).marginTop);
+            block.bottom = block === own ? headerBox.bottom : block.tabs.at(-1).getBoundingClientRect().bottom;
+          }
         }
         event.preventDefault();
+        const dy = Math.min(blocks.at(-1).bottom - own.bottom, pointerDelta);
         let to = from;
         for (const [index, block] of blocks.entries()) {
           const mid = (block.top + block.bottom) / 2;
           if (index < from && own.top + dy < mid) to = Math.min(to,index);
           if (index > from && own.bottom + dy > mid) to = Math.max(to,index);
         }
+        if (state.pin) to = 0;
         state.to = to;
         let opening = false;
-        const gap = state.pinnedRows.find(row => row.item === state.pin)?.item.querySelector('.tab-group-label-container')?.getBoundingClientRect().height || own.tabs[0]?.getBoundingClientRect().height || 40;
+        const gap = own.bottom - own.top;
         for (const {item} of state.pinnedRows) {
           if (item === state.pin) opening = true;
           place(item, opening ? gap : 0, false);
         }
-        state.header.toggleAttribute("ztt-pin-preview", !!state.pin);
+        const sep = currentSeparator();
+        if (sep) place(sep,state.pin ? gap : 0,false);
+        for (const tab of tabsIn(state.strip)) {
+          if (!getState(state.strip).assignments.has(tab)) place(tab,state.pin ? gap : 0,false);
+        }
         const height = blocks[from + 1] ? blocks[from + 1].top - own.top : own.bottom - own.top;
         for (const [index, block] of blocks.entries()) {
           const shift = index === from ? dy : index >= to && index < from ? height :
             index <= to && index > from ? -height : 0;
-          for (const row of [block.node, ...block.tabs]) place(row, shift, index === from);
+          if (index === from) place(block.node,shift,true);
+          else for (const row of [block.node, ...block.tabs]) place(row,shift,false);
         }
       }, true);
       listen(window, 'pointerup', event => {
@@ -6453,7 +6466,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
   }
 
   & > .tab-group-container::after {
-    content: "\\E000\\2002 Drag tabs here";
+    content: "";
     font-family: "Zia Slot Arrow", system-ui, sans-serif;
     display: flex;
     align-items: center;
@@ -6598,7 +6611,9 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     @media (prefers-reduced-motion:reduce) {
       #tabbrowser-tabs [zia-dragging], .tabbrowser-tab[zia-essential-proxy] { transition:none!important; }
     }
-    :root[ztt-moving-topic] .ztt-header[ztt-pin-preview] ~ .tabbrowser-tab[zia-dragging] { visibility:hidden!important; }
+    #tabbrowser-tabs .tabbrowser-tab[ztt-topic-folded] { display:none!important; }
+    #tabbrowser-tabs .ztt-header[zia-dragging] .ztt-group-close { opacity:.75!important; }
+    :root .tabbrowser-tab .tabbrowser-tab[zen-glance-tab] { display:none!important; }
     .ztt-header { user-select:none; touch-action:none; }
     #tabbrowser-tabs .ztt-header[zia-shift] { transition:transform 100ms ease-out!important; }
     #tabbrowser-tabs .ztt-header[zia-dragging] { transition:none!important; }
