@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.43
+// @version        0.14.44
 // ==/UserScript==
 (() => {
   'use strict';
@@ -5664,7 +5664,9 @@
     }
     #tabContextMenu > [ztt-omit] { display:none!important; }
     #tabbrowser-tabs[expanded] .tabbrowser-tab[busy]:not([zen-essential]) :is(.tab-reset-button,.tab-reset-pin-button,.tab-close-button) { display:none!important; }
-    .ztt-action-tip:popover-open { display:flex; align-items:center; gap:3px; position:fixed; inset:auto; margin:0; pointer-events:none;
+    .ztt-action-tip:popover-open { position:fixed; inset:auto; margin:0; }
+    #ztt-panel-tip { appearance:none!important; }
+    .ztt-action-tip:popover-open, #ztt-panel-tip { display:flex; align-items:center; gap:3px; pointer-events:none;
       padding:5px 10px; border:none; border-radius:18px; color:CanvasText;
       background:color-mix(in srgb,Canvas 94%,var(--zen-primary-color,AccentColor)); box-shadow:0 2px 10px #0003;
       font:600 13px system-ui; }
@@ -7185,6 +7187,10 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     const tip=node('div','ztt-action-tip');
     tip.setAttribute('popover','manual'); tip.setAttribute('role','tooltip');
     document.documentElement.append(tip);
+    const panelTip=document.createXULElement('tooltip');
+    panelTip.id='ztt-panel-tip';
+    panelTip.classList.add('ztt-action-tip');
+    document.getElementById('mainPopupSet').append(panelTip);
     const rules=[
       ['.tabbrowser-tab[zen-essential]','',''],
       ['.zen-glance-sidebar-close,.tab-close-button','Close','key_close'],
@@ -7215,6 +7221,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
       for(const [el,name,value] of nativeLabels.splice(0)) {
         if(!el.hasAttribute(name)) el.setAttribute(name,value);
       }
+      if(panelTip.state !== 'closed') panelTip.hidePopup();
       anchor=null; if(tip.matches(':popover-open')) tip.hidePopover(); }
     function renderCaption(caption) {
       const match=String(caption).match(/^(.*?)\s*\(([⌘⌃⇧⌥]+)([^()]*)\)([\s\S]*)$/u);
@@ -7228,11 +7235,17 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
       }
       return false;
     };
+    function showPanelTip(el) {
+      if (!inPopup(el)) return false;
+      panelTip.replaceChildren(...tip.childNodes);
+      panelTip.openPopup(el,'after_start',0,5,false,false);
+      return true;
+    }
     let dragging=false;
     function hover(e) {
       if (dragging) return;
       const path=e.composedPath();
-      if (inPopup(path[0])) { hide(); return; }
+
       for (const [selector,label,keyId] of rules) {
         const el=path.find(n=>n.matches?.(selector));
         if (!el) continue;
@@ -7266,6 +7279,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
               tip.append(node('kbd','',mods[mod]||mod));
             tip.append(node('kbd','',letter.toUpperCase()));
           }
+          if (showPanelTip(el)) return;
           tip.showPopover();
           const r=el.getBoundingClientRect(), w=tip.offsetWidth, h=tip.offsetHeight;
           if (el.matches('.zen-glance-sidebar-close,.zen-glance-sidebar-open') && r.right+w+8<innerWidth) {
@@ -7289,26 +7303,30 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     for(const event of ['pointerdown','keydown','dragstart','blur']) window.addEventListener(event,hide,opts);
     window.addEventListener('popupshowing',e=>{
       if (e.target.matches('panel,menupopup')) hide();
-      if (e.target.localName==='tooltip' && (dragging || (anchor && !inPopup(e.target.triggerNode || document.tooltipNode)))) e.preventDefault();
+      if (e.target.localName==='tooltip' && e.target!==panelTip && (dragging || anchor)) e.preventDefault();
     },opts);
     // Some chrome controls populate an anonymous tooltip only as it opens.
     window.addEventListener('popupshowing',event=>{
       const popup=event.target;
-      if(dragging || anchor || popup.localName!=='tooltip' || popup===silent) return;
+      if(dragging || anchor || popup.localName!=='tooltip' || popup===silent || popup===panelTip) return;
       const target=popup.triggerNode || document.tooltipNode;
-      if(inPopup(target) || !target?.closest?.('#navigator-toolbox,#browser') || target.localName==='browser') return;
+      if(!target || (!inPopup(target) && !target.closest?.('#navigator-toolbox,#browser')) || target.localName==='browser') return;
       const caption=popup.getAttribute('label') || target.getAttribute('tooltiptext') ||
         target.getAttribute('title') || popup.textContent.trim();
       if(!caption) return;
       event.preventDefault();
       anchor=target;
       renderCaption(caption);
+      if (showPanelTip(target)) return;
       tip.showPopover();
       const box=target.getBoundingClientRect();
       tip.style.left=Math.max(4,Math.min(innerWidth-tip.offsetWidth-4,box.left))+'px';
       tip.style.top=(box.bottom+tip.offsetHeight+8<innerHeight ? box.bottom+5 : box.top-tip.offsetHeight-5)+'px';
     },{signal:abort.signal});
-    abort.signal.addEventListener('abort',()=>{hide();tip.remove();silent.remove();},{once:true});
+    window.addEventListener('popuphiding',event=>{
+      if (event.target.matches('panel,menupopup') && inPopup(anchor)) hide();
+    },opts);
+    abort.signal.addEventListener('abort',()=>{hide();tip.remove();panelTip.remove();silent.remove();},{once:true});
   }
   function installModSettings() {
     const settings = [
