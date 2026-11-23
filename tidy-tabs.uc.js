@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.39
+// @version        0.14.40
 // ==/UserScript==
 (() => {
   'use strict';
@@ -268,15 +268,11 @@
     const strip = activeStrip();
     const state = states.get(strip);
     if (!state) return;
-    const dropped = new Set(tabs);
-    let topic = null;
-    for (const row of strip.children) {
-      if (state.headers.includes(row)) topic = row.dataset.zttGroup;
-      if (!dropped.has(row) || !eligible(row, strip)) continue;
-      const name = targetTopic || topic;
-      if (name) state.assignments.set(row, name);
+    for (const row of tabs) {
+      if (!eligible(row, strip)) continue;
+      if (targetTopic) state.assignments.set(row, targetTopic);
       else state.assignments.delete(row);
-      saveGroup(row, name);
+      saveGroup(row, targetTopic || null);
     }
     for (const tab of tabs) {
       if (!eligible(tab, strip) && state.assignments.delete(tab)) saveGroup(tab, null);
@@ -1441,7 +1437,8 @@
 
       const measureHeadings = () => (states.get(activeStrip())?.headers || []).map(node => {
         const box = node.getBoundingClientRect();
-        return {node, mid:box.top + box.height / 2};
+        const last = members(activeStrip(), node.dataset.zttGroup).at(-1);
+        return {node, mid:box.top + box.height / 2, bottom:last?.getBoundingClientRect().bottom ?? box.bottom};
       });
 
       const measureRows = (keepOpen = null) => {
@@ -1792,8 +1789,8 @@
         // (and several selected tabs: Firefox placed them by its measure of the list, which the
         // drag had shifted, and two dragged a few rows down went to the end of it)
         const topic = below && !folder && !drag.folder && !drag.split
-          ? drag.headings.findLast(({mid}) => visualMid >= mid)?.node.dataset.zttGroup : null;
-        const hand = !!(topic || drag.folder || drag.split || folder || pf || (nf && isFolderStart(next, nf)) || crosses || drag.companions);
+          ? drag.headings.findLast(({mid, bottom}) => visualMid >= mid && visualMid <= bottom + 4)?.node.dataset.zttGroup : null;
+        const hand = !!(topic || states.get(activeStrip())?.assignments.has(drag.tab) || drag.folder || drag.split || folder || pf || (nf && isFolderStart(next, nf)) || crosses || drag.companions);
         // a tap going into or out of a folder (Zen's own are muted during a drag), not for
         // the one it's in as it starts
         if (drag.target && folder !== drag.target.folder) {
@@ -2140,6 +2137,22 @@
         }
         return sep;
       }
+      // Leave a short visual trace while the layout immediately frees the rows.
+      function fadeRows(rows) {
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const visible = rows.map(tab => ({tab, box:tab.getBoundingClientRect()}))
+          .filter(({box}) => box.height > 1 && box.bottom > 0 && box.top < innerHeight);
+        for (const {tab,box} of visible) {
+          const label = tab.querySelector('.tab-label');
+          if (!label) continue;
+          const ghost = node('div','ztt-fold-trace',tab.label);
+          const textBox = label.getBoundingClientRect();
+          ghost.style.cssText = `left:${textBox.left}px;top:${box.top}px;width:${textBox.width}px;height:${box.height}px;font:${getComputedStyle(label).font};color:${getComputedStyle(label).color}`;
+          document.documentElement.append(ghost);
+          ghost.animate([{opacity:.85},{opacity:0,transform:'translateY(-5px)'}],
+            {duration:110,easing:'ease-out',fill:'forwards'}).finished.finally(() => ghost.remove());
+        }
+      }
       const endTopic = commit => {
         const state = topicDrag;
         if (!state) return;
@@ -2193,6 +2206,7 @@
           state.started = true;
           state.header.setPointerCapture(event.pointerId);
           root.setAttribute('ztt-moving-topic', '');
+          fadeRows(own.tabs);
           for (const tab of own.tabs) tab.setAttribute('ztt-topic-folded','');
           for (const block of blocks) {
             const headerBox = block.node.getBoundingClientRect();
@@ -3552,6 +3566,7 @@
       // closed folder. A plain click still just closes it.
       let snapping = null;
       const snapShut = (folder) => {
+        fadeRows(Array.from(folder.tabs || []));
         try {
           folder.collapsed = true;
         } catch (err) {
@@ -4819,7 +4834,7 @@
           const clips =
             ["hidden", "auto", "scroll", "clip"].includes(style.overflowY) || /paint|strict|content/.test(style.contain);
           const scrolls = el.scrollTop > 0 || el.scrollHeight > el.clientHeight + 1;
-          return clips && !scrolls;
+          return (clips || style.clipPath !== "none") && !scrolls;
         };
         const lifted = [];
         let el = node?.parentNode;
@@ -4833,15 +4848,15 @@
           }
           el = el.parentNode || el.host;
         }
-        const props = ["overflow", "overflow-x", "overflow-y", "contain"];
+        const props = ["overflow", "overflow-x", "overflow-y", "contain", "clip-path"];
         // (never a scroll box, such as the tab list's own: let out, Firefox builds it and every
         // row in it again, and once more as it's put back, about 1,000 rows' worth at the start
         // of every drag and as many at the drop, the drag starting late on Windows; #566)
         const scrollBox = (style) => ["hidden", "auto", "scroll"].includes(style.overflowY) || ["hidden", "auto", "scroll"].includes(style.overflowX);
-        for (const each of lifted.filter(clipping).filter((el) => !scrollBox(getComputedStyle(el)))) {
+        for (const each of lifted.filter(clipping).filter((el) => isFolderEl(node) || !scrollBox(getComputedStyle(el)))) {
           remember(each, props);
           for (const prop of props) {
-            each.style.setProperty(prop, prop === "contain" ? "none" : "visible", "important");
+            each.style.setProperty(prop, prop === "contain" || prop === "clip-path" ? "none" : "visible", "important");
           }
         }
       };
@@ -6621,6 +6636,14 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     }
     :root[zia-dragging-tab] .zen-workspace-pinned-tabs-section:has(zen-folder[zia-dragging]) {
       overflow:visible!important; clip-path:none!important;
+    }
+    .ztt-fold-trace { position:fixed; z-index:2147483647; display:block; align-content:center;
+      pointer-events:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #tabbrowser-tabs zen-folder[zia-empty]:not([collapsed]) > .tab-group-container {
+      min-block-size:var(--zia-slot-h,var(--tab-min-height,35px))!important;
+    }
+    #tabbrowser-tabs zen-folder[zia-empty] > .tab-group-container::after {
+      background:none!important; animation:none!important;
     }
     #tabbrowser-tabs .tabbrowser-tab[ztt-topic-folded] { display:none!important; }
     #tabbrowser-tabs .ztt-header[zia-dragging] .ztt-group-close { opacity:.75!important; }
