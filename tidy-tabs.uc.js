@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.42
+// @version        0.14.43
 // ==/UserScript==
 (() => {
   'use strict';
@@ -7221,10 +7221,18 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
       tip.replaceChildren(node('span','',match ? match[1]+match[4] : caption));
       if(match) for(const key of [...match[2],match[3]].filter(Boolean)) tip.append(node('kbd','',key));
     }
+    // Native popup widgets sit above the browser document's popover layer.
+    const inPopup = target => {
+      for (let el=target; el; el=el.parentNode || el.host) {
+        if (el.matches?.('panel,menupopup')) return true;
+      }
+      return false;
+    };
     let dragging=false;
     function hover(e) {
       if (dragging) return;
       const path=e.composedPath();
+      if (inPopup(path[0])) { hide(); return; }
       for (const [selector,label,keyId] of rules) {
         const el=path.find(n=>n.matches?.(selector));
         if (!el) continue;
@@ -7279,13 +7287,16 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     window.addEventListener('pointerover',hover,opts);
     window.addEventListener('pointerout',e=>{if(anchor && !anchor.contains(e.relatedTarget)) hide();},opts);
     for(const event of ['pointerdown','keydown','dragstart','blur']) window.addEventListener(event,hide,opts);
-    window.addEventListener('popupshowing',e=>{if((anchor || dragging) && e.target.localName==='tooltip') e.preventDefault();},opts);
+    window.addEventListener('popupshowing',e=>{
+      if (e.target.matches('panel,menupopup')) hide();
+      if (e.target.localName==='tooltip' && (dragging || (anchor && !inPopup(e.target.triggerNode || document.tooltipNode)))) e.preventDefault();
+    },opts);
     // Some chrome controls populate an anonymous tooltip only as it opens.
     window.addEventListener('popupshowing',event=>{
       const popup=event.target;
       if(dragging || anchor || popup.localName!=='tooltip' || popup===silent) return;
       const target=popup.triggerNode || document.tooltipNode;
-      if(!target?.closest?.('#navigator-toolbox,#browser') || target.localName==='browser') return;
+      if(inPopup(target) || !target?.closest?.('#navigator-toolbox,#browser') || target.localName==='browser') return;
       const caption=popup.getAttribute('label') || target.getAttribute('tooltiptext') ||
         target.getAttribute('title') || popup.textContent.trim();
       if(!caption) return;
