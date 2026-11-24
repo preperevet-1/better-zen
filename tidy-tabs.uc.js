@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.48
+// @version        0.14.50
 // ==/UserScript==
 (() => {
   'use strict';
@@ -6688,9 +6688,21 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     #zen-folder-tabs-popup .zen-folder-tabs-list-scrollbox {
       background:var(--ztt-frame-bg)!important; border-radius:var(--ztt-frame-radius);
     }
-    #zen-folder-tabs-popup #zen-folder-tabs-list { padding:8px!important; background:transparent!important; }
+    #zen-folder-tabs-popup #zen-folder-tabs-list { box-sizing:border-box; inline-size:100%; flex:1; padding:8px!important; background:transparent!important; }
     #zen-folder-tabs-popup .folders-tabs-list-item-label { font-size:110%; }
-    #zen-folder-tabs-popup .folders-tabs-list-item-content { margin-block:0; height:34px; padding-inline-start:12px; border-radius:7px; corner-shape:squircle; }
+    #zen-folder-tabs-popup .folders-tabs-list-item-content { margin-block:0; height:36px; padding-inline:12px 6px; border-radius:8px; corner-shape:squircle; }
+    #zen-folder-tabs-popup .folders-tabs-list-item-label {
+      inline-size:100%; min-inline-size:0;
+    }
+    #zen-folder-tabs-popup .folders-tabs-list-item[selected]:hover > .folders-tabs-list-item-content::after {
+      content:"Go ↩" / "";
+      display:flex; align-items:center; box-sizing:border-box; flex:0 0 48px; height:24px;
+      margin-inline-start:6px; padding-inline:8px 6px; border-radius:4px;
+      white-space:pre; pointer-events:none;
+      font:500 12px/14px -apple-system,system-ui,sans-serif; letter-spacing:-.04em;
+      background:light-dark(rgb(0 0 0 / 5%),rgb(255 255 255 / 5%));
+      color:light-dark(rgb(0 0 0 / 35%),rgb(255 255 255 / 55%));
+    }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
       border-radius:var(--ztt-frame-radius); corner-shape:squircle; background:var(--ztt-frame-bg); color:var(--ztt-frame-fg);
@@ -6700,7 +6712,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     .ztt-create-row { box-sizing:border-box; width:100%; height:40px; padding:0 10px;
       appearance:none; display:flex; align-items:center; gap:10px; color:inherit;
       font:inherit; font-size:13px; font-weight:600; border:0; outline:0; border-radius:14px; corner-shape:squircle; background:transparent; }
-    #zen-folder-tabs-popup .folders-tabs-list-item:is(:hover,[selected]) > .folders-tabs-list-item-content,
+    #zen-folder-tabs-popup .folders-tabs-list-item[selected] > .folders-tabs-list-item-content,
     .ztt-create-row:enabled:is(:hover,:focus-visible) { background:var(--ztt-menu-hover); }
     .ztt-create-row:disabled { opacity:.45; }
     .ztt-create-icon { flex:0 0 26.4px; height:26.4px; background:currentColor; mask: no-repeat center / contain; }
@@ -7454,6 +7466,12 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     installModSettings();
     const folderPreview = document.getElementById('zen-folder-tabs-popup');
     if (folderPreview) {
+      folderPreview.addEventListener('pointermove', event => {
+        const item = event.target.closest?.('.folders-tabs-list-item');
+        if (!item || item.hasAttribute('selected')) return;
+        for (const selected of item.parentElement.querySelectorAll('[selected]')) selected.removeAttribute('selected');
+        item.setAttribute('selected','true');
+      }, {signal:abort.signal});
       const openPopup = folderPreview.openPopup;
       function openBesideFolder(anchor, options, ...args) {
         if (anchor?.closest('zen-folder') && options && typeof options === 'object') {
