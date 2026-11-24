@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.52
+// @version        0.14.53
 // ==/UserScript==
 (() => {
   'use strict';
@@ -5592,8 +5592,28 @@
       if (strip) render(strip);
     }, 100);
   }
+  const glanceCard = ':is(.zen-glance-overlay, #zen-glance-detached) .browserContainer';
   const style = node('style');
   style.textContent = `
+      ${glanceCard} .browserStack {
+        margin-block: max(10px, 1.2vh) !important;
+        border-radius: 10px !important;
+        box-shadow: 0 6px 24px rgb(0 0 0 / 35%) !important;
+        outline: 1px solid rgb(255 255 255 / 12%);
+        outline-offset: -1px;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        ${glanceCard} .zen-glance-sidebar-container toolbarbutton {
+          animation: ztt-peek-glance-button 320ms cubic-bezier(.2,.95,.35,1.15) backwards;
+        }
+        ${glanceCard} toolbarbutton:nth-child(2) { animation-delay: 50ms; }
+        ${glanceCard} toolbarbutton:nth-child(3) { animation-delay: 100ms; }
+        @keyframes ztt-peek-glance-button {
+          from { scale: .4; opacity: 0; }
+          to { scale: 1; opacity: 1; }
+        }
+      }
+
     :root {
       --ztt-playing-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-3.0%22%20width%3D%222%22%20height%3D%226%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-3.0%3B-1%3B-3.0%22%20dur%3D%220.62s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%226%3B2%3B6%22%20dur%3D%220.62s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-5.5%22%20width%3D%222%22%20height%3D%2211%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-5.5%3B-1%3B-5.5%22%20dur%3D%220.69s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%2211%3B2%3B11%22%20dur%3D%220.69s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-4.0%22%20width%3D%222%22%20height%3D%228%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-4.0%3B-1%3B-4.0%22%20dur%3D%220.76s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%228%3B2%3B8%22%20dur%3D%220.76s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-6.5%22%20width%3D%222%22%20height%3D%2213%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-6.5%3B-1%3B-6.5%22%20dur%3D%220.8300000000000001s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%2213%3B2%3B13%22%20dur%3D%220.8300000000000001s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-3.5%22%20width%3D%222%22%20height%3D%227%22%20rx%3D%221%22%3E%3Canimate%20attributeName%3D%22y%22%20values%3D%22-3.5%3B-1%3B-3.5%22%20dur%3D%220.9s%22%20repeatCount%3D%22indefinite%22%2F%3E%3Canimate%20attributeName%3D%22height%22%20values%3D%227%3B2%3B7%22%20dur%3D%220.9s%22%20repeatCount%3D%22indefinite%22%2F%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E");
       --ztt-muted-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cg%20transform%3D%22translate%280%208%29%22%20fill%3D%22context-fill%22%3E%3Crect%20x%3D%221%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%224%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%227%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2210%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3Crect%20x%3D%2213%22%20y%3D%22-1.0%22%20width%3D%222%22%20height%3D%222%22%20rx%3D%221%22%3E%3C%2Frect%3E%3C%2Fg%3E%3C%2Fsvg%3E");
@@ -7462,6 +7482,39 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     },{once:true});
   }
 
+  function installGlanceMotion() {
+    const ui = window.gZenUIManager;
+    if (!ui?.elementAnimate) return;
+    const animate = ui.elementAnimate;
+    function animateGlance(element, frames, options, ...rest) {
+      const axes = ["x", "y", "scaleX", "scaleY"];
+      if (element?.matches?.(glanceCard) && axes.every(axis => Array.isArray(frames?.[axis]) && frames[axis].length >= 2)) {
+        if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          options = { ...options, duration: 0 };
+        } else if (options?.duration > 0) {
+          // Keep Zen's measured link and card bounds in both directions.
+          // Sample a critically damped spring with a 240 ms response.
+          const duration = 360;
+          const progress = Array.from({length: 49}, (_, i) => {
+            const t = 2 * Math.PI * duration * i / (240 * 48);
+            return i === 48 ? 1 : 1 - (1 + t) * Math.exp(-t);
+          });
+          frames = { ...frames };
+          for (const axis of axes) {
+            const start = frames[axis][0];
+            const end = frames[axis].at(-1);
+            frames[axis] = progress.map(p => start + (end - start) * p);
+          }
+          options = { ...options, duration, easing: "linear" };
+        }
+      }
+      return animate.call(this, element, frames, options, ...rest);
+    }
+    ui.elementAnimate = animateGlance;
+    abort.signal.addEventListener('abort', () => {
+      if (ui.elementAnimate === animateGlance) ui.elementAnimate = animate;
+    }, {once:true});
+  }
   function init() {
     if (destroyed) return;
     if (!window.gBrowser || !window.gZenWorkspaces) { startupTimer = setTimeout(init, 250); return; }
@@ -7520,6 +7573,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
         if (folderPreview.openPopup === openBesideFolder) delete folderPreview.openPopup;
       }, {once:true});
     }
+    installGlanceMotion();
     installPlaybackIndicators();
     installPinnedBehavior();
     installCreateMenu();
