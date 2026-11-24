@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.44
+// @version        0.14.45
 // ==/UserScript==
 (() => {
   'use strict';
@@ -6657,10 +6657,31 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
       box-sizing:border-box!important; inline-size:var(--ztt-drag-width)!important;
       min-inline-size:var(--ztt-drag-width)!important; max-inline-size:var(--ztt-drag-width)!important;
     }
+    :is(#ztt-create-panel,#zen-folder-tabs-popup) {
+      --ztt-frame-bg:light-dark(#fffefe,#2c2b30);
+      --ztt-frame-fg:light-dark(#171619,#f5f3f7);
+      --ztt-frame-shadow:0 2px 9px rgb(0 0 0 / .12),0 0 1px rgb(0 0 0 / .15);
+      --ztt-frame-radius:22px;
+    }
+    #zen-folder-tabs-popup {
+      --panel-background:var(--ztt-frame-bg);
+      --panel-color:var(--ztt-frame-fg);
+      --panel-border-color:transparent;
+      --panel-border-radius:var(--ztt-frame-radius);
+      --panel-shadow:var(--ztt-frame-shadow);
+    }
+    #zen-folder-tabs-popup::part(content) {
+      background:var(--ztt-frame-bg)!important; color:var(--ztt-frame-fg)!important;
+      border:0!important; border-radius:var(--ztt-frame-radius)!important;
+      corner-shape:squircle; box-shadow:var(--ztt-frame-shadow)!important;
+    }
+    #zen-folder-tabs-popup .tabs-list-header { display:none!important; }
+    #zen-folder-tabs-popup #zen-folder-tabs-list { padding:8px!important; }
+    #zen-folder-tabs-popup .folders-tabs-list-item-content { margin-block:0; border-radius:14px; corner-shape:squircle; }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
-      border-radius:22px; corner-shape:squircle; background:light-dark(#fffefe,#2c2b30); color:light-dark(#171619,#f5f3f7);
-      box-shadow:0 2px 9px rgb(0 0 0 / .12),0 0 1px rgb(0 0 0 / .15);
+      border-radius:var(--ztt-frame-radius); corner-shape:squircle; background:var(--ztt-frame-bg); color:var(--ztt-frame-fg);
+      box-shadow:var(--ztt-frame-shadow);
       --ztt-accent:var(--zen-primary-color,AccentColor); }
     .ztt-create-list { box-sizing:border-box; width:100%; padding:8px; font:menu; }
     .ztt-create-row { box-sizing:border-box; width:100%; height:40px; padding:0 10px;
