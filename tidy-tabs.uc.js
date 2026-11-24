@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.46
+// @version        0.14.47
 // ==/UserScript==
 (() => {
   'use strict';
@@ -6665,6 +6665,9 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     }
     #zen-folder-tabs-popup {
       --ztt-frame-radius:10px;
+      border-radius:var(--ztt-frame-radius)!important;
+      clip-path:inset(0 round var(--ztt-frame-radius));
+      overflow:clip!important;
       appearance:none!important; -moz-default-appearance:none!important;
       background:transparent!important; border:0!important; box-shadow:none!important;
       --panel-background:var(--ztt-frame-bg);
@@ -6685,6 +6688,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
       background:var(--ztt-frame-bg)!important; border-radius:var(--ztt-frame-radius);
     }
     #zen-folder-tabs-popup #zen-folder-tabs-list { padding:8px!important; background:transparent!important; }
+    #zen-folder-tabs-popup .folders-tabs-list-item-label { font-size:110%; }
     #zen-folder-tabs-popup .folders-tabs-list-item-content { margin-block:0; height:34px; border-radius:7px; corner-shape:squircle; }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
@@ -7446,13 +7450,21 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     Services.prefs.setBoolPref('zen.pinned-tab-manager.restore-pinned-tabs-to-pinned-url',true);
     gBrowser.tabContainer.tabDragAndDrop._clearDragOverSplit?.();
     installModSettings();
-    document.getElementById('zen-folder-tabs-popup')?.addEventListener('popupshown', event => {
-      const popup = event.currentTarget;
-      const anchor = popup.anchorNode;
-      if (event.target !== popup || !anchor) return;
-      const right = gZenVerticalTabsManager._prefsRightSide;
-      popup.moveToAnchor(anchor, right ? 'start_before' : 'end_before', right ? -8 : 8, 0);
-    }, {signal:abort.signal});
+    const folderPreview = document.getElementById('zen-folder-tabs-popup');
+    if (folderPreview) {
+      const openPopup = folderPreview.openPopup;
+      function openBesideFolder(anchor, options, ...args) {
+        if (anchor?.closest('zen-folder') && options && typeof options === 'object') {
+          const right = gZenVerticalTabsManager._prefsRightSide;
+          options = {...options, position:right ? 'start_before' : 'end_before', x:right ? -8 : 8, y:0};
+        }
+        return openPopup.call(this, anchor, options, ...args);
+      }
+      folderPreview.openPopup = openBesideFolder;
+      abort.signal.addEventListener('abort', () => {
+        if (folderPreview.openPopup === openBesideFolder) delete folderPreview.openPopup;
+      }, {once:true});
+    }
     installPlaybackIndicators();
     installPinnedBehavior();
     installCreateMenu();
