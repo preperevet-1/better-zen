@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.51
+// @version        0.14.52
 // ==/UserScript==
 (() => {
   'use strict';
@@ -6717,7 +6717,9 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     .ztt-create-row { box-sizing:border-box; width:100%; height:40px; padding:0 10px;
       appearance:none; display:flex; align-items:center; gap:10px; color:inherit;
       font:inherit; font-size:13px; font-weight:600; border:0; outline:0; border-radius:14px; corner-shape:squircle; background:transparent; }
-    #zen-folder-tabs-popup .folders-tabs-list-item[selected] > .folders-tabs-list-item-content,
+    #zen-folder-tabs-popup .folders-tabs-list-item[selected] > .folders-tabs-list-item-content {
+      background:light-dark(color-mix(in srgb,var(--ztt-menu-hover),white 25%),color-mix(in srgb,var(--ztt-menu-hover),white 5%));
+    }
     .ztt-create-row:enabled:is(:hover,:focus-visible) { background:var(--ztt-menu-hover); }
     .ztt-create-row:disabled { opacity:.45; }
     .ztt-create-icon { flex:0 0 26.4px; height:26.4px; background:currentColor; mask: no-repeat center / contain; }
