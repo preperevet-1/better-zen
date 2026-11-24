@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.47
+// @version        0.14.48
 // ==/UserScript==
 (() => {
   'use strict';
@@ -6662,6 +6662,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
       --ztt-frame-fg:light-dark(#171619,#f5f3f7);
       --ztt-frame-shadow:0 2px 9px rgb(0 0 0 / .12),0 0 1px rgb(0 0 0 / .15);
       --ztt-frame-radius:22px;
+      --ztt-menu-hover:color-mix(in srgb,var(--zen-primary-color,AccentColor) 18%,light-dark(#e6e3e9,#49454f));
     }
     #zen-folder-tabs-popup {
       --ztt-frame-radius:10px;
@@ -6689,7 +6690,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     }
     #zen-folder-tabs-popup #zen-folder-tabs-list { padding:8px!important; background:transparent!important; }
     #zen-folder-tabs-popup .folders-tabs-list-item-label { font-size:110%; }
-    #zen-folder-tabs-popup .folders-tabs-list-item-content { margin-block:0; height:34px; border-radius:7px; corner-shape:squircle; }
+    #zen-folder-tabs-popup .folders-tabs-list-item-content { margin-block:0; height:34px; padding-inline-start:12px; border-radius:7px; corner-shape:squircle; }
     #ztt-create-panel {
       position:fixed; inset:auto; margin:0; padding:0; border:0; outline:0; overflow:visible;
       border-radius:var(--ztt-frame-radius); corner-shape:squircle; background:var(--ztt-frame-bg); color:var(--ztt-frame-fg);
@@ -6699,7 +6700,8 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     .ztt-create-row { box-sizing:border-box; width:100%; height:40px; padding:0 10px;
       appearance:none; display:flex; align-items:center; gap:10px; color:inherit;
       font:inherit; font-size:13px; font-weight:600; border:0; outline:0; border-radius:14px; corner-shape:squircle; background:transparent; }
-    .ztt-create-row:enabled:is(:hover,:focus-visible) { background:color-mix(in srgb,var(--ztt-accent) 18%,light-dark(#e6e3e9,#49454f)); }
+    #zen-folder-tabs-popup .folders-tabs-list-item:is(:hover,[selected]) > .folders-tabs-list-item-content,
+    .ztt-create-row:enabled:is(:hover,:focus-visible) { background:var(--ztt-menu-hover); }
     .ztt-create-row:disabled { opacity:.45; }
     .ztt-create-icon { flex:0 0 26.4px; height:26.4px; background:currentColor; mask: no-repeat center / contain; }
     .ztt-create-shortcut { margin-inline-start:auto; color:#b8b8b8!important;
