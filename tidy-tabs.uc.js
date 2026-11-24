@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.50
+// @version        0.14.51
 // ==/UserScript==
 (() => {
   'use strict';
@@ -6694,6 +6694,11 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     #zen-folder-tabs-popup .folders-tabs-list-item-label {
       inline-size:100%; min-inline-size:0;
     }
+    @media (prefers-reduced-motion:no-preference) {
+      @keyframes ztt-folder-preview-in { from { opacity:0; translate:0 3px; } to { opacity:1; translate:0 0; } }
+      #zen-folder-tabs-popup[ztt-open]::part(content) { animation:ztt-folder-preview-in 110ms ease-out; }
+    }
+    #zen-folder-tabs-popup[ztt-keys] .folders-tabs-list-item[selected] > .folders-tabs-list-item-content::after,
     #zen-folder-tabs-popup .folders-tabs-list-item[selected]:hover > .folders-tabs-list-item-content::after {
       content:"Go ↩" / "";
       display:flex; align-items:center; box-sizing:border-box; flex:0 0 48px; height:24px;
@@ -7466,7 +7471,35 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     installModSettings();
     const folderPreview = document.getElementById('zen-folder-tabs-popup');
     if (folderPreview) {
+      const opts = {capture:true, signal:abort.signal};
+      folderPreview.addEventListener('popupshowing', () => folderPreview.setAttribute('ztt-open',''), opts);
+      folderPreview.addEventListener('popuphidden', () => {
+        folderPreview.removeAttribute('ztt-open');
+        folderPreview.removeAttribute('ztt-keys');
+      }, opts);
+      window.addEventListener('keydown', event => {
+        if (folderPreview.state !== 'open' || !['ArrowUp','ArrowDown','Tab'].includes(event.key) ||
+            event.altKey || event.ctrlKey || event.metaKey) return;
+        const rows = [...folderPreview.querySelectorAll('.folders-tabs-list-item:not([hidden])')];
+        if (!rows.length) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        folderPreview.setAttribute('ztt-keys','');
+        const current = rows.findIndex(row => row.hasAttribute('selected'));
+        const backwards = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey);
+        const next = current < 0 ? (backwards ? rows.length-1 : 0)
+          : (current + (backwards ? -1 : 1) + rows.length) % rows.length;
+        for (const row of rows) row.toggleAttribute('selected', row === rows[next]);
+        rows[next].scrollIntoView({block:'nearest',behavior:'instant'});
+      }, opts);
+      // Scrolling can dispatch mouseenter under a stationary pointer.
+      folderPreview.addEventListener('mouseenter', event => {
+        if (folderPreview.hasAttribute('ztt-keys') && event.target.matches('.folders-tabs-list-item'))
+          event.stopImmediatePropagation();
+      }, opts);
       folderPreview.addEventListener('pointermove', event => {
+        if (folderPreview.hasAttribute('ztt-keys') && !event.movementX && !event.movementY) return;
+        folderPreview.removeAttribute('ztt-keys');
         const item = event.target.closest?.('.folders-tabs-list-item');
         if (!item || item.hasAttribute('selected')) return;
         for (const selected of item.parentElement.querySelectorAll('[selected]')) selected.removeAttribute('selected');
