@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.58
+// @version        0.14.59
 // ==/UserScript==
 (() => {
   'use strict';
@@ -5595,23 +5595,34 @@
   const glanceCard = ':is(.zen-glance-overlay, #zen-glance-detached) .browserContainer';
   const style = node('style');
   style.textContent = `
-      .browserSidebarContainer.zen-glance-background {
+      .browserSidebarContainer.zen-glance-background,
+      #tabbrowser-tabpanels:has(.zen-glance-overlay[fade-out="true"]) > .browserSidebarContainer.deck-selected:not(.zen-glance-overlay) {
         opacity: 1 !important;
         transform: none !important;
       }
-      .browserSidebarContainer.zen-glance-overlay {
-        background-color: rgb(0 0 0 / 45%) !important;
-      }
-      #zen-main-app-wrapper:has(> #zen-glance-detached) #tabbrowser-tabpanels::after {
+      .zen-glance-overlay::before, #tabbrowser-tabpanels::after {
         content: "";
         position: absolute;
         inset: 0;
-        background: rgb(0 0 0 / 45%);
         pointer-events: none;
-        z-index: 2;
+        background: black;
+        opacity: 0;
+        transition: opacity 225ms cubic-bezier(.4,0,.6,1);
       }
-      #zen-main-app-wrapper:has(> #zen-glance-detached) #tabbrowser-tabpanels {
-        position: relative;
+      .zen-glance-overlay { contain: layout; }
+      .zen-glance-overlay::before { z-index: -1; }
+      #tabbrowser-tabpanels { position: relative; }
+      #tabbrowser-tabpanels::after { z-index: 2; }
+      .zen-glance-overlay:not([fade-out="true"]):not(:has([ztt-expanding]))::before,
+      #zen-main-app-wrapper:has(> #zen-glance-detached:not([fade-out="true"])) #tabbrowser-tabpanels::after {
+        opacity: .45;
+        transition-duration: 275ms;
+      }
+      @starting-style {
+        .zen-glance-overlay:not([fade-out="true"]):not(:has([ztt-expanding]))::before { opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .zen-glance-overlay::before, #tabbrowser-tabpanels::after { transition: none !important; }
       }
       #zen-loading-progress-bar { display: none !important; }
       ${glanceCard} .browserStack {
@@ -7502,30 +7513,6 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     },{once:true});
   }
 
-  // Use the two edge springs to move and stretch one live page surface.
-  // A single surface avoids antialiasing seams between independently clipped tiles.
-  function peekOpening(frames, height) {
-    const linkHeight = frames.scaleY[0] * height;
-    const ay = Math.max(-1, Math.min(1, 2 * (frames.y[0] + linkHeight/2) / height - 1));
-    const bend = ay < 0 ? ay * .75 : ay;
-    const response = 240 / .9;
-    const duration = 1.5 * response * (1 + Math.abs(bend)/2);
-    const steps = Math.ceil(duration / 16);
-    const transform = Array.from({length: steps+1}, (_, i) => {
-      function edge(row) {
-        const t = 2*Math.PI * duration*i / (steps*response*(1 + (row-.5)*bend));
-        const remaining = i === steps ? 0 : (1+t)*Math.exp(-t);
-        const value = axis => frames[axis][1] + (frames[axis][0]-frames[axis][1])*remaining;
-        return {x:value('x'), y:value('y')+row*height*value('scaleY'), scale:Math.max(.00001,value('scaleX'))};
-      }
-      const top = edge(0), bottom = edge(1);
-      const scaleX = (top.scale + bottom.scale)/2;
-      const scaleY = (bottom.y - top.y)/height;
-      return `translate(${(top.x+bottom.x)/2}px,${top.y}px) scale(${scaleX},${scaleY})`;
-    });
-    return { transform, duration };
-  }
-
   function installGlanceMotion() {
     const ui = window.gZenUIManager;
     if (!ui?.elementAnimate) return;
@@ -7569,16 +7556,11 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
             axis, [frames[axis][0], frames[axis].at(-1)]
           ]));
           const opening = frames.scaleX[0] * frames.scaleY[0] < frames.scaleX[1] * frames.scaleY[1];
-          if (opening) {
-            const height = window.windowUtils.getBoundsWithoutFlushing(element).height;
-            if (height > 0) {
-              const motion = peekOpening(frames, height);
-              frames = {transform:motion.transform};
-              options = {...options, duration:motion.duration, easing:'linear'};
-            }
-          } else {
-            options = { ...options, duration: 290, easing: "cubic-bezier(.2,.75,.22,1)" };
-          }
+          // Both transforms have the same function list so the compositor can
+          // interpolate directly at the display refresh rate.
+          options = opening
+            ? { ...options, duration: 300, easing: "cubic-bezier(.16,.64,.26,1)" }
+            : { ...options, duration: 240, easing: "cubic-bezier(.42,0,.56,1)" };
         }
       }
       return animate.call(this, element, frames, options, ...rest);
