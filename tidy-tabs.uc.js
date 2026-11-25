@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.55
+// @version        0.14.56
 // ==/UserScript==
 (() => {
   'use strict';
@@ -5599,16 +5599,19 @@
         opacity: 1 !important;
         transform: none !important;
       }
-      .browserSidebarContainer.zen-glance-overlay::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: -1;
+      .browserSidebarContainer.zen-glance-overlay {
+        background-color: rgb(0 0 0 / 45%) !important;
       }
-      .browserSidebarContainer.zen-glance-overlay::before,
-      #zen-glance-detached .zen-glance-detached-backdrop {
-        background-color: rgb(0 0 0 / 45%);
+      #zen-main-app-wrapper:has(> #zen-glance-detached) #tabbrowser-tabpanels::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: rgb(0 0 0 / 45%);
+        pointer-events: none;
+        z-index: 2;
+      }
+      #zen-main-app-wrapper:has(> #zen-glance-detached) #tabbrowser-tabpanels {
+        position: relative;
       }
       #zen-loading-progress-bar { display: none !important; }
       ${glanceCard} .browserStack {
@@ -7513,7 +7516,18 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
           frames = Object.fromEntries(axes.map(axis => [
             axis, [frames[axis][0], frames[axis].at(-1)]
           ]));
-          options = { ...options, duration: 290, easing: "cubic-bezier(.2,.75,.22,1)" };
+          const opening = frames.scaleX[0] * frames.scaleY[0] < frames.scaleX[1] * frames.scaleY[1];
+          if (opening) {
+            // Let the width lead the height during expansion, then settle together.
+            const progress = { x: .77, y: .73, scaleX: .8, scaleY: .7 };
+            for (const axis of axes) {
+              const [start, end] = frames[axis];
+              frames[axis].splice(1, 0, start + (end - start) * progress[axis]);
+            }
+            options = { ...options, duration: 350, easing: "linear(0, .12 6%, .5 21%, .78 36%, .95 54%, 1.006 75%, 1)" };
+          } else {
+            options = { ...options, duration: 290, easing: "cubic-bezier(.2,.75,.22,1)" };
+          }
         }
       }
       return animate.call(this, element, frames, options, ...rest);
