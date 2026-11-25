@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.57
+// @version        0.14.58
 // ==/UserScript==
 (() => {
   'use strict';
@@ -5621,6 +5621,7 @@
         outline: 1px solid rgb(255 255 255 / 12%);
         outline-offset: -1px;
       }
+      ${glanceCard} .browserStack[ztt-expanding] { margin-block: 0 !important; }
       @media (prefers-reduced-motion: no-preference) {
         ${glanceCard} .zen-glance-sidebar-container toolbarbutton {
           animation: ztt-peek-glance-button 320ms cubic-bezier(.2,.95,.35,1.15) backwards;
@@ -7501,102 +7502,63 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     },{once:true});
   }
 
-  // DiaTweaks Peek/Motion.m samples three critically damped springs across
-  // a 3x3 mesh. Snapshot once and let the compositor interpolate its triangles.
-  async function animatePeekMesh(element, frames) {
-    const browser = element.querySelector('browser');
-    if (!browser || !element.isConnected) return false;
-    const panel = element.closest('#zen-glance-detached') || gBrowser.tabpanels;
-    const bounds = panel.getBoundingClientRect();
-    const surface = element.querySelector('.browserStack').getBoundingClientRect();
-    if (!surface.width || !surface.height || !bounds.width || !bounds.height) return false;
-    const layer = node('div');
-    layer.className = 'ztt-peek-mesh';
-    layer.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:1';
-    const previousOpacity = element.style.opacity;
-    try {
-      element.style.opacity = '0';
-      const wrapper = element.getBoundingClientRect();
-      const x = frames.x[0], y = frames.y[0];
-      const width = wrapper.width * frames.scaleX[0], height = wrapper.height * frames.scaleY[0];
-      const endX = frames.x.at(-1) + surface.left - wrapper.left;
-      const endY = frames.y.at(-1) + surface.top - wrapper.top;
-      const ay = Math.max(-1, Math.min(1, 2 * (y + height/2) / bounds.height - 1));
-      const g = ay < 0 ? ay * .75 : ay;
-      const responses = [0,.5,1].map(v => (240/.9) * (1 - .5*g + g*(g < 0 ? 1-Math.sqrt(1-v) : Math.sqrt(v))));
-      const duration = 1.5 * Math.max(...responses);
-      const tileWidth = surface.width / 2, tileHeight = surface.height / 2;
-      const steps = Math.ceil(duration / 12);
-      const mesh = Array.from({length: steps + 1}, (_, frame) => responses.map((response, row) => {
-        const t = 2 * Math.PI * duration * frame / (steps * response);
-        const remaining = frame === steps ? 0 : (1+t)*Math.exp(-t);
-        const mix = (from,to) => to + (from-to)*remaining;
-        return {left: mix(x,endX), width: mix(width,surface.width),
-          y: mix(y+row*height/2,endY+row*tileHeight)};
-      }));
-      const animations = [];
-      const tiles = [];
-      element.before(layer);
-      for (let row = 0; row < 2; row++) for (let col = 0; col < 2; col++) {
-        for (const lower of [false,true]) {
-          const tile = node('canvas');
-          tiles.push({tile, row, col});
-          const clip = lower ? 'polygon(0 0,100% 100%,0 100%)' : 'polygon(0 0,100% 0,100% 100%)';
-          tile.style.cssText = `position:absolute;left:0;top:0;width:${tileWidth}px;height:${tileHeight}px;background:light-dark(white,#111);transform-origin:0 0;clip-path:${clip};will-change:transform`;
-          const corner = (row ? 'Bottom' : 'Top') + (col ? 'Right' : 'Left');
-          tile.style['border' + corner + 'Radius'] = '10px';
-          layer.append(tile);
-          const keyframes = mesh.map(rows => {
-            const top = rows[row], bottom = rows[row+1];
-            const left = top.left + col*top.width/2;
-            const sx = (lower ? bottom.width : top.width) / surface.width;
-            const side = (col + (lower ? 0 : 1))/2;
-            const shear = (bottom.left-top.left + side*(bottom.width-top.width))/tileHeight;
-            return {transform:`matrix(${sx},0,${shear},${(bottom.y-top.y)/tileHeight},${left},${top.y})`};
-          });
-          animations.push(tile.animate(keyframes,{duration,fill:'both'}));
-        }
+  // Use the two edge springs to move and stretch one live page surface.
+  // A single surface avoids antialiasing seams between independently clipped tiles.
+  function peekOpening(frames, height) {
+    const linkHeight = frames.scaleY[0] * height;
+    const ay = Math.max(-1, Math.min(1, 2 * (frames.y[0] + linkHeight/2) / height - 1));
+    const bend = ay < 0 ? ay * .75 : ay;
+    const response = 240 / .9;
+    const duration = 1.5 * response * (1 + Math.abs(bend)/2);
+    const steps = Math.ceil(duration / 16);
+    const transform = Array.from({length: steps+1}, (_, i) => {
+      function edge(row) {
+        const t = 2*Math.PI * duration*i / (steps*response*(1 + (row-.5)*bend));
+        const remaining = i === steps ? 0 : (1+t)*Math.exp(-t);
+        const value = axis => frames[axis][1] + (frames[axis][0]-frames[axis][1])*remaining;
+        return {x:value('x'), y:value('y')+row*height*value('scaleY'), scale:Math.max(.00001,value('scaleX'))};
       }
-      // Start motion immediately, even during a process switch or slow navigation.
-      // A thumbnail is local to this opening and is discarded with the mesh.
-      const paint = async () => {
-        const deadline = performance.now() + 150;
-        while (layer.isConnected && performance.now() < deadline &&
-               (!browser.browsingContext?.currentWindowGlobal || browser.currentURI?.spec === 'about:blank' || browser.webProgress?.isLoadingDocument)) {
-          await new Promise(resolve => setTimeout(resolve, 16));
-        }
-        if (!layer.isConnected) return;
-        const target = browser.browsingContext?.currentWindowGlobal;
-        if (!target) return;
-        const image = await target.drawSnapshot(null, 1, '#ffffff');
-        try {
-          if (!layer.isConnected || target !== browser.browsingContext?.currentWindowGlobal) return;
-          for (const {tile,row,col} of tiles) {
-            tile.width = Math.ceil(image.width/2);
-            tile.height = Math.ceil(image.height/2);
-            tile.getContext('2d').drawImage(image,col*image.width/2,row*image.height/2,
-              image.width/2,image.height/2,0,0,tile.width,tile.height);
-          }
-        } finally {
-          image.close();
-        }
-      };
-      paint().catch(() => {});
-      await Promise.all(animations.map(animation => animation.finished));
-      return true;
-    } catch {
-      return false;
-    } finally {
-      layer.remove();
-      element.style.opacity = previousOpacity;
-    }
+      const top = edge(0), bottom = edge(1);
+      const scaleX = (top.scale + bottom.scale)/2;
+      const scaleY = (bottom.y - top.y)/height;
+      return `translate(${(top.x+bottom.x)/2}px,${top.y}px) scale(${scaleX},${scaleY})`;
+    });
+    return { transform, duration };
   }
 
   function installGlanceMotion() {
     const ui = window.gZenUIManager;
     if (!ui?.elementAnimate) return;
     const animate = ui.elementAnimate;
+    const manager = window.gZenGlanceManager;
+    const fullyOpen = manager?.fullyOpenGlance;
+    let expandFrom;
+    async function expandGlance(options) {
+      const stack = this.browserWrapper?.querySelector('.browserStack');
+      if (options?.forSplit || !stack || expandFrom) return fullyOpen.apply(this, arguments);
+      expandFrom = stack.getBoundingClientRect();
+      try {
+        return await fullyOpen.apply(this, arguments);
+      } finally {
+        expandFrom = null;
+      }
+    }
+    if (fullyOpen) manager.fullyOpenGlance = expandGlance;
     function animateGlance(element, frames, options, ...rest) {
+      if (expandFrom && manager.animatingFullOpen && frames?.scale && element === manager.browserWrapper?.parentElement) {
+        const stack = manager.browserWrapper.querySelector('.browserStack');
+        stack.setAttribute('ztt-expanding', '');
+        const to = stack.getBoundingClientRect();
+        const from = expandFrom;
+        if (to.width && to.height) {
+          const dx = from.left - to.left, dy = from.top - to.top;
+          const transform = `translate(${dx}px,${dy}px) scale(${from.width/to.width},${from.height/to.height})`;
+          return animate.call(this, stack, {transform:[transform,'translate(0px,0px) scale(1,1)'],
+            transformOrigin:['0 0','0 0']}, {...options, duration:320, easing:'cubic-bezier(.22,.8,.23,1)'})
+            .finally(() => stack.removeAttribute('ztt-expanding'));
+        }
+        stack.removeAttribute('ztt-expanding');
+      }
       const axes = ["x", "y", "scaleX", "scaleY"];
       if (element?.matches?.(glanceCard) && axes.every(axis => Array.isArray(frames?.[axis]) && frames[axis].length >= 2)) {
         if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -7608,10 +7570,12 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
           ]));
           const opening = frames.scaleX[0] * frames.scaleY[0] < frames.scaleX[1] * frames.scaleY[1];
           if (opening) {
-            const fallback = () => animate.call(this, element, frames, {
-              ...options, duration: 330, easing: "cubic-bezier(.2,.8,.2,1)"
-            }, ...rest);
-            return animatePeekMesh(element, frames).then(shown => shown || fallback());
+            const height = window.windowUtils.getBoundsWithoutFlushing(element).height;
+            if (height > 0) {
+              const motion = peekOpening(frames, height);
+              frames = {transform:motion.transform};
+              options = {...options, duration:motion.duration, easing:'linear'};
+            }
           } else {
             options = { ...options, duration: 290, easing: "cubic-bezier(.2,.75,.22,1)" };
           }
@@ -7621,6 +7585,7 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     }
     ui.elementAnimate = animateGlance;
     abort.signal.addEventListener('abort', () => {
+      if (fullyOpen && manager.fullyOpenGlance === expandGlance) manager.fullyOpenGlance = fullyOpen;
       if (ui.elementAnimate === animateGlance) ui.elementAnimate = animate;
     }, {once:true});
   }
