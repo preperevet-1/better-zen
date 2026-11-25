@@ -2,7 +2,7 @@
 // @name           Zen Tidy Tabs
 // @description    Rule-based tab grouping with native Zen folders.
 // @include        main
-// @version        0.14.53
+// @version        0.14.54
 // ==/UserScript==
 (() => {
   'use strict';
@@ -5595,6 +5595,7 @@
   const glanceCard = ':is(.zen-glance-overlay, #zen-glance-detached) .browserContainer';
   const style = node('style');
   style.textContent = `
+      #zen-loading-progress-bar { display: none !important; }
       ${glanceCard} .browserStack {
         margin-block: max(10px, 1.2vh) !important;
         border-radius: 10px !important;
@@ -7482,6 +7483,46 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
     },{once:true});
   }
 
+  function peekTravel(element, frames) {
+    const { width, height } = element.getBoundingClientRect();
+    if (!(width > 0 && height > 0)) return null;
+    const opening = frames.scaleX[0] * frames.scaleY[0] <= frames.scaleX.at(-1) * frames.scaleY.at(-1);
+    const linkIndex = opening ? 0 : -1;
+    const cardIndex = opening ? -1 : 0;
+    const linkMidY = frames.y.at(linkIndex) + height * frames.scaleY.at(linkIndex) / 2;
+    const relativeY = Math.max(-1, Math.min(1, 2 * linkMidY / height - 1));
+    const bend = (relativeY < 0 ? 0.75 : 1) * relativeY * (opening ? 1 : -1);
+    const response = 240 / 0.9;
+    const topResponse = response * (1 - bend / 2);
+    const bottomResponse = response * (1 + bend / 2);
+    const duration = Math.max(topResponse, bottomResponse) * 1.6;
+    const steps = Math.max(60, Math.ceil(duration * 0.12));
+    function edge(row, time, settled) {
+      const t = 2 * Math.PI * time / (row ? bottomResponse : topResponse);
+      const remaining = settled ? 0 : (1 + t) * Math.exp(-t);
+      const weight = opening ? remaining : 1 - remaining;
+      function value(axis) {
+        const card = frames[axis].at(cardIndex);
+        return card + (frames[axis].at(linkIndex) - card) * weight;
+      }
+      return { x: value("x"), y: value("y") + row * height * value("scaleY"),
+        scale: Math.max(0.000001, value("scaleX")) };
+    }
+    const transforms = [];
+    for (let i = 0; i <= steps; i++) {
+      const time = duration * i / steps;
+      const top = edge(0, time, i === steps);
+      const bottom = edge(1, time, i === steps);
+      // Map the live browser surface to the moving trapezoid. Perspective
+      // division lets the two horizontal edges grow at different rates.
+      const w = top.scale / bottom.scale;
+      const dx = (bottom.x * w - top.x) / height;
+      const dy = (bottom.y * w - top.y) / height;
+      transforms.push(`matrix3d(${top.scale},0,0,0,${dx},${dy},0,${(w - 1) / height},0,0,1,0,${top.x},${top.y},0,1)`);
+    }
+    return { transforms, duration };
+  }
+
   function installGlanceMotion() {
     const ui = window.gZenUIManager;
     if (!ui?.elementAnimate) return;
@@ -7492,20 +7533,11 @@ tab-group[split-view-group]:has(.tabbrowser-tab[zia-split-of]) {
         if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
           options = { ...options, duration: 0 };
         } else if (options?.duration > 0) {
-          // Keep Zen's measured link and card bounds in both directions.
-          // Sample a critically damped spring with a 240 ms response.
-          const duration = 360;
-          const progress = Array.from({length: 49}, (_, i) => {
-            const t = 2 * Math.PI * duration * i / (240 * 48);
-            return i === 48 ? 1 : 1 - (1 + t) * Math.exp(-t);
-          });
-          frames = { ...frames };
-          for (const axis of axes) {
-            const start = frames[axis][0];
-            const end = frames[axis].at(-1);
-            frames[axis] = progress.map(p => start + (end - start) * p);
+          const motion = peekTravel(element, frames);
+          if (motion) {
+            frames = { transform: motion.transforms };
+            options = { ...options, duration: motion.duration, easing: "linear" };
           }
-          options = { ...options, duration, easing: "linear" };
         }
       }
       return animate.call(this, element, frames, options, ...rest);
